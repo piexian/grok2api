@@ -27,10 +27,33 @@ def build_sso_cookie(sso_token: str) -> str:
     # SSO Cookie
     cookie = f"sso={sso_token}; sso-rw={sso_token}"
 
-    # CF Clearance
-    cf_clearance = get_config("proxy.cf_clearance")
-    if cf_clearance:
-        cookie += f";cf_clearance={cf_clearance}"
+    # CF Cookies
+    cf_cookies = get_config("proxy.cf_cookies") or ""
+    cf_clearance = (get_config("proxy.cf_clearance") or "").strip()
+    cf_refresh_enabled = bool(get_config("proxy.enabled"))
+
+    if cf_refresh_enabled:
+        if not cf_cookies and cf_clearance:
+            cf_cookies = f"cf_clearance={cf_clearance}"
+    elif cf_clearance:
+        if cf_cookies:
+            # Replace existing cf_clearance or append if missing.
+            if re.search(r"(?:^|;\\s*)cf_clearance=", cf_cookies):
+                cf_cookies = re.sub(
+                    r"(^|;\\s*)cf_clearance=[^;]*",
+                    r"\\1cf_clearance=" + cf_clearance,
+                    cf_cookies,
+                    count=1,
+                )
+            else:
+                cf_cookies = cf_cookies.rstrip("; ")
+                cf_cookies = f"{cf_cookies}; cf_clearance={cf_clearance}"
+        else:
+            cf_cookies = f"cf_clearance={cf_clearance}"
+    if cf_cookies:
+        if cookie and not cookie.endswith(";"):
+            cookie += "; "
+        cookie += cf_cookies
 
     return cookie
 

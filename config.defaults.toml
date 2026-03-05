@@ -4,7 +4,7 @@
 app_url = ""
 # 后台管理密码
 app_key = "grok2api"
-# API 调用密钥（可选）
+# API 调用密钥（可选，支持列表）
 api_key = ""
 # 是否启用 public 功能玩法
 public_enabled = false
@@ -24,10 +24,10 @@ stream = true
 thinking = true
 # 是否动态生成 Statsig 指纹
 dynamic_statsig = true
+# 自定义指令
+custom_instruction = ""
 # 过滤的特殊标签列表
 filter_tags = ["xaiartifact","xai:tool_usage_card","grok:render"]
-# Tool call 模式: "prompt" (默认, 提示词模拟) 或 "passthrough" (实验性, 使用 toolOverrides)
-tool_call_mode = "prompt"
 
 
 # ==================== 代理配置 ====================
@@ -36,6 +36,18 @@ tool_call_mode = "prompt"
 base_proxy_url = ""
 # 资源代理地址（代理静态资源如图片/视频）
 asset_proxy_url = ""
+# 完整 CF Cookies（自动刷新写入）
+cf_cookies = ""
+# 跳过代理 SSL 证书验证（代理使用自签名证书时启用）
+skip_proxy_ssl_verify = false
+# 是否启用 CF 自动刷新
+enabled = false
+# FlareSolverr 服务地址（通过环境变量 FLARESOLVERR_URL 自动设置）
+flaresolverr_url = ""
+# 刷新间隔（秒）
+refresh_interval = 3600
+# CF 挑战等待超时（秒）
+timeout = 60
 # Cloudflare Clearance Cookie
 cf_clearance = ""
 # curl_cffi 浏览器指纹

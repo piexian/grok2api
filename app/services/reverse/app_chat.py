@@ -34,6 +34,18 @@ class AppChatReverse:
     """/rest/app-chat/conversations/new reverse interface."""
 
     @staticmethod
+    def _resolve_custom_personality() -> Optional[str]:
+        """Resolve optional custom personality from app config."""
+        value = get_config("app.custom_instruction", "")
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = str(value)
+        if not value.strip():
+            return None
+        return value
+
+    @staticmethod
     def build_payload(
         message: str,
         model: str,
@@ -81,6 +93,10 @@ class AppChatReverse:
             "temporary": get_config("app.temporary"),
             "toolOverrides": tool_overrides or {},
         }
+
+        custom_personality = AppChatReverse._resolve_custom_personality()
+        if custom_personality is not None:
+            payload["customPersonality"] = custom_personality
 
         if model_config_override:
             payload["responseMetadata"]["modelConfigOverride"] = model_config_override
@@ -148,6 +164,17 @@ class AppChatReverse:
                 file_attachments=file_attachments,
                 tool_overrides=tool_overrides,
                 model_config_override=model_config_override,
+            )
+            payload_summary = {
+                "model": payload.get("modelName"),
+                "mode": payload.get("modelMode"),
+                "message_len": payload.get("message") or "",
+                "file_attachments": len(payload.get("fileAttachments") or []),
+                "custom_personality_len": len(payload.get("customPersonality") or ""),
+            }
+            logger.debug(
+                "AppChatReverse final Grok params (redacted)",
+                extra={"grok_payload": payload_summary},
             )
 
             # Curl Config

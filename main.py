@@ -75,11 +75,30 @@ async def lifespan(app: FastAPI):
         scheduler = get_scheduler(interval)
         scheduler.start()
 
+    # 5. 启动 cf_clearance 自动刷新
+    #    环境变量 FLARESOLVERR_URL 会作为初始值写入配置（兼容旧部署方式）
+    _flaresolverr_env = os.getenv("FLARESOLVERR_URL", "")
+    if _flaresolverr_env and not get_config("proxy.flaresolverr_url"):
+        await config.update({
+            "proxy": {
+                "enabled": True,
+                "flaresolverr_url": _flaresolverr_env,
+                "refresh_interval": int(os.getenv("CF_REFRESH_INTERVAL", "600")),
+                "timeout": int(os.getenv("CF_TIMEOUT", "60")),
+            }
+        })
+
+    from app.services.cf_refresh import start as cf_refresh_start
+    cf_refresh_start()
+
     logger.info("Application startup complete.")
     yield
 
     # 关闭
     logger.info("Shutting down Grok2API...")
+
+    from app.services.cf_refresh import stop as cf_refresh_stop
+    cf_refresh_stop()
 
     from app.core.storage import StorageFactory
 
@@ -137,35 +156,33 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/v1/admin")
     app.include_router(public_router, prefix="/v1/public")
     app.include_router(pages_router)
+    
+    # 健康检查接口（用于 Render、服务器保活检测等）
+    @app.get("/health")
+    def health():
+        """
+        健康检查接口，用于服务器保活或 Render 自动检测
+        """
+        return {"status": "ok"}
 
-    return app
+    return app    
 
 
 app = create_app()
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     host = os.getenv("SERVER_HOST", "0.0.0.0")
     port = int(os.getenv("SERVER_PORT", "8000"))
     workers = int(os.getenv("SERVER_WORKERS", "1"))
-
-    # 平台检查
-    is_windows = platform.system() == "Windows"
-
-    # 自动降级
-    if is_windows and workers > 1:
-        logger.warning(
-            f"Windows platform detected. Multiple workers ({workers}) is not supported. "
-            "Using single worker instead."
-        )
-        workers = 1
-
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        workers=workers,
-        log_level=os.getenv("LOG_LEVEL", "INFO").lower(),
+    log_level = os.getenv("LOG_LEVEL", "INFO").lower()
+    logger.error(
+        "Direct startup via `python main.py` is disabled. "
+        "Please run with Granian CLI to avoid Python wrapper issues."
     )
+    logger.error(
+        "Use: uv run granian --interface asgi "
+        f"--host {host} --port {port} --workers {workers} "
+        f"--log-level {log_level} main:app"
+    )
+    raise SystemExit(1)
