@@ -336,7 +336,7 @@ function renderTable() {
 
     // Note (Left)
     const tdNote = document.createElement('td');
-    tdNote.className = 'text-left text-gray-500 text-xs truncate max-w-[150px]';
+    tdNote.className = 'text-left text-gray-500 text-xs token-note-cell';
     tdNote.innerText = item.note || '-';
 
     // Actions (Center)
