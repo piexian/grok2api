@@ -95,9 +95,9 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _json_format(record) -> str:
-    """为 Loguru 提供 JSON 格式输出。"""
-    return _format_json(record) + "\n"
+def _patch_json_record(record) -> None:
+    """为全局 Loguru 记录补充序列化后的 JSON 文本。"""
+    record["extra"]["_json_line"] = _format_json(record)
 
 
 def setup_logging(
@@ -108,6 +108,7 @@ def setup_logging(
     file_retention_count: int | None = None,
 ):
     """设置日志配置"""
+    logger.configure(patcher=_patch_json_record)
     logger.remove()
     file_logging = _env_flag("LOG_FILE_ENABLED", file_logging)
     rotation_size_mb = _env_int(
@@ -128,7 +129,7 @@ def setup_logging(
         logger.add(
             sys.stdout,
             level=level,
-            format=_json_format,
+            format="{extra[_json_line]}",
             colorize=False,
             backtrace=False,
             diagnose=False,
@@ -148,7 +149,7 @@ def setup_logging(
         if _prepare_log_dir():
             file_kwargs: dict[str, Any] = {
                 "level": level,
-                "format": _json_format,
+                "format": "{extra[_json_line]}",
                 "colorize": False,
                 "enqueue": True,
                 "encoding": "utf-8",
