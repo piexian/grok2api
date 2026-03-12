@@ -9,7 +9,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from loguru import logger as _loguru_logger
+from loguru import logger
 
 # 日志目录
 DEFAULT_LOG_DIR = Path(__file__).parent.parent.parent / "logs"
@@ -73,13 +73,6 @@ def _format_json(record) -> str:
     return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 
-def _patch_json_record(record) -> None:
-    """为 Loguru 记录补充序列化后的 JSON 文本。"""
-    record["extra"]["_json_line"] = _format_json(record)
-
-
-logger = _loguru_logger.patch(_patch_json_record)
-
 # Provide logging.Logger compatibility for legacy calls
 if not hasattr(logger, "isEnabledFor"):
     logger.isEnabledFor = lambda _level: True
@@ -100,6 +93,11 @@ def _env_int(name: str, default: int) -> int:
         return int(raw.strip())
     except (TypeError, ValueError):
         return default
+
+
+def _json_format(record) -> str:
+    """为 Loguru 提供 JSON 格式输出。"""
+    return _format_json(record) + "\n"
 
 
 def setup_logging(
@@ -130,7 +128,7 @@ def setup_logging(
         logger.add(
             sys.stdout,
             level=level,
-            format="{extra[_json_line]}",
+            format=_json_format,
             colorize=False,
             backtrace=False,
             diagnose=False,
@@ -150,7 +148,7 @@ def setup_logging(
         if _prepare_log_dir():
             file_kwargs: dict[str, Any] = {
                 "level": level,
-                "format": "{extra[_json_line]}",
+                "format": _json_format,
                 "colorize": False,
                 "enqueue": True,
                 "encoding": "utf-8",
