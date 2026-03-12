@@ -14,6 +14,8 @@ const NUMERIC_FIELDS = new Set([
   'limit_mb',
   'save_delay_ms',
   'usage_flush_interval_sec',
+  'on_demand_refresh_min_interval_sec',
+  'on_demand_refresh_max_tokens',
   'upload_concurrent',
   'upload_timeout',
   'download_concurrent',
@@ -32,7 +34,10 @@ const NUMERIC_FIELDS = new Set([
   'medium_min_bytes',
   'blocked_parallel_attempts',
   'concurrent',
-  'batch_size'
+  'batch_size',
+  'max_file_size_mb',
+  'max_files',
+  'request_slow_ms'
 ]);
 
 const LOCALE_MAP = {
@@ -42,19 +47,19 @@ const LOCALE_MAP = {
     "app_key": { title: "后台密码", desc: "登录 Grok2API 管理后台的密码（必填）。" },
     "function_enabled": { title: "启用功能玩法", desc: "是否启用功能玩法入口（关闭则功能玩法页面不可访问）。" },
     "function_key": { title: "Function 密码", desc: "功能玩法页面的访问密码（可选）。" },
-    "app_url": { title: "应用地址", desc: "当前 Grok2API 服务的外部访问 URL，用于文件链接访问。" },
-    "image_format": { title: "图片格式", desc: "默认生成的图片格式（url 或 base64）。" },
-    "video_format": { title: "视频格式", desc: "默认生成的视频格式（html 或 url，url 为处理后的链接）。" },
-    "temporary": { title: "临时对话", desc: "是否默认启用临时对话模式。" },
-    "disable_memory": { title: "禁用记忆", desc: "是否默认禁用 Grok 记忆功能。" },
-    "stream": { title: "流式响应", desc: "是否默认启用流式输出。" },
-    "thinking": { title: "思维链", desc: "是否默认启用思维链输出。" },
-    "dynamic_statsig": { title: "动态指纹", desc: "是否默认启用动态生成 Statsig 指纹。" },
-    "custom_instruction": { title: "自定义指令", desc: "多行文本，会透传为 Grok 请求参数 customPersonality。" },
-    "filter_tags": { title: "过滤标签", desc: "设置自动过滤 Grok 响应中的特殊标签。" }
+    "consumed_mode_enabled": { title: "启用消耗模式", desc: "启用新额度管理逻辑：使用本地消耗记录而非 API 返回值，支持更均衡的负载分配。（试验性功能，默认关闭）" },
+    "on_demand_refresh_enabled": { title: "按需刷新", desc: "当请求拿不到可用 Token 时，是否允许触发受限的按需刷新。" },
+    "on_demand_refresh_min_interval_sec": { title: "按需刷新最小间隔", desc: "请求侧按需刷新之间的最小间隔（秒），用于避免刷新风暴。" },
+    "on_demand_refresh_max_tokens": { title: "按需刷新最大数量", desc: "单次请求侧按需刷新最多检查多少个 cooling Token。" }
   },
 
-
+  "log": {
+    "label": "日志配置",
+    "max_file_size_mb": { title: "单文件上限", desc: "单个日志文件大小上限（MB），超过后自动轮转；设置为 0 或负数表示不按大小轮转。" },
+    "max_files": { title: "保留文件数", desc: "最多保留多少个日志文件；设置为 0 或负数表示不限制数量。" },
+    "log_all_requests": { title: "记录全部请求", desc: "开启后记录所有请求；关闭时仅记录慢请求、异常请求和错误请求。" },
+    "request_slow_ms": { title: "慢请求阈值", desc: "请求耗时超过该值（毫秒）时会写入日志。" }
+},
   "proxy": {
     "label": "代理配置",
     "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
@@ -152,7 +157,6 @@ const LOCALE_MAP = {
     "save_delay_ms": { title: "保存延迟", desc: "Token 变更合并写入的延迟（毫秒）。" },
     "usage_flush_interval_sec": { title: "用量落库间隔", desc: "用量类字段写入数据库的最小间隔（秒）。" },
     "reload_interval_sec": { title: "同步间隔", desc: "多 worker 场景下 Token 状态刷新间隔（秒）。" },
-    "consumed_mode_enabled": { title: "启用消耗模式", desc: "启用新额度管理逻辑：使用本地消耗记录而非 API 返回值，支持更均衡的负载分配。（试验性功能，默认关闭）" }
   },
 
 
