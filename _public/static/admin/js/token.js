@@ -174,13 +174,39 @@ function updateStats(data) {
   let invalidTokens = 0;
   let nsfwTokens = 0;
   let noNsfwTokens = 0;
-  let chatQuota = 0;
   let totalCalls = 0;
+
+  // 分桶额度汇总
+  let grok3Total = 0, grok3Remaining = 0, grok3HighRemaining = 0;
+  let grok4Total = 0, grok4Remaining = 0;
+  let grok41Queries = 0;
+  let editCooldownCount = 0;
+  let hasBucketData = false;
+  let legacyChatQuota = 0;
 
   flatTokens.forEach(t => {
     if (t.status === 'active') {
       activeTokens++;
-      chatQuota += t.quota;
+      legacyChatQuota += t.quota;
+
+      if (t.grok3_quota) {
+        hasBucketData = true;
+        grok3Total += t.grok3_quota.total_tokens;
+        grok3Remaining += t.grok3_quota.remaining_tokens;
+        grok3HighRemaining += t.grok3_quota.high_remaining;
+      }
+      if (t.grok4_quota) {
+        hasBucketData = true;
+        grok4Total += t.grok4_quota.total_tokens;
+        grok4Remaining += t.grok4_quota.remaining_tokens;
+      }
+      if (t.grok41_queries != null) {
+        grok41Queries += t.grok41_queries;
+      }
+      if (t.model_cooldowns && t.model_cooldowns['grok-imagine-1.0-edit']) {
+        const until = t.model_cooldowns['grok-imagine-1.0-edit'];
+        if (until > Date.now()) editCooldownCount++;
+      }
     } else if (t.status === 'cooling') {
       coolingTokens++;
     } else {
@@ -194,16 +220,40 @@ function updateStats(data) {
     totalCalls += Number(t.use_count || 0);
   });
 
-  const imageQuota = Math.floor(chatQuota / 2);
-
   setText('stat-total', totalTokens.toLocaleString());
   setText('stat-active', activeTokens.toLocaleString());
   setText('stat-cooling', coolingTokens.toLocaleString());
   setText('stat-invalid', invalidTokens.toLocaleString());
 
-  setText('stat-chat-quota', chatQuota.toLocaleString());
-  setText('stat-image-quota', imageQuota.toLocaleString());
+  // Row 2: Chat 桶
+  if (hasBucketData) {
+    setText('stat-grok3-quota', `${grok3Remaining} / ${grok3Total}`);
+    setBar('stat-grok3-bar', grok3Remaining, grok3Total, '#10b981');
+    setText('stat-grok4-quota', `${grok4Remaining} / ${grok4Total}`);
+    setBar('stat-grok4-bar', grok4Remaining, grok4Total, '#3b82f6');
+    setText('stat-grok41-quota', `${grok41Queries} queries`);
+  } else {
+    // 降级: 显示旧的 chatQuota
+    setText('stat-grok3-quota', legacyChatQuota.toLocaleString());
+    setBar('stat-grok3-bar', 0, 0, '#10b981');
+    setText('stat-grok4-quota', '-');
+    setBar('stat-grok4-bar', 0, 0, '#3b82f6');
+    setText('stat-grok41-quota', '-');
+  }
   setText('stat-total-calls', totalCalls.toLocaleString());
+
+  // Row 3: Image / Video / Edit
+  if (hasBucketData) {
+    setText('stat-image-quota', `${grok3HighRemaining}`);
+    setText('stat-video-quota', `${grok3HighRemaining}`);
+    const editAvailable = activeTokens - editCooldownCount;
+    setText('stat-edit-quota', editAvailable > 0 ? `${editAvailable} 可用` : '冷却中');
+  } else {
+    const imageQuota = Math.floor(legacyChatQuota / 2);
+    setText('stat-image-quota', imageQuota.toLocaleString());
+    setText('stat-video-quota', '-');
+    setText('stat-edit-quota', '-');
+  }
 
   updateTabCounts({
     all: totalTokens,
@@ -213,6 +263,13 @@ function updateStats(data) {
     nsfw: nsfwTokens,
     'no-nsfw': noNsfwTokens
   });
+}
+
+function setBar(id, value, max, color) {
+  const el = byId(id);
+  if (!el) return;
+  const pct = max > 0 ? Math.round(value / max * 100) : 0;
+  el.innerHTML = `<div class="fill" style="width:${pct}%;background:${color}"></div>`;
 }
 
 function renderTable() {
@@ -288,10 +345,36 @@ function renderTable() {
     }
     tdStatus.innerHTML = statusHtml;
 
-    // Quota (Center)
+    // Quota (多桶展示)
     const tdQuota = document.createElement('td');
-    tdQuota.className = 'text-center font-mono text-xs';
-    tdQuota.innerText = item.quota;
+    if (item.grok3_quota || item.grok4_quota) {
+      tdQuota.className = 'text-left text-xs';
+      let html = '<div class="quota-multi">';
+      if (item.grok3_quota) {
+        const g3 = item.grok3_quota;
+        const g3pct = g3.total_tokens ? Math.round(g3.remaining_tokens / g3.total_tokens * 100) : 0;
+        html += `<div class="quota-row">
+          <span class="quota-label">G3</span>
+          <div class="quota-bar-mini"><div class="quota-fill" style="width:${g3pct}%"></div></div>
+          <span class="quota-num">${g3.remaining_tokens}/${g3.total_tokens}</span>
+        </div>`;
+      }
+      if (item.grok4_quota) {
+        const g4 = item.grok4_quota;
+        const g4pct = g4.total_tokens ? Math.round(g4.remaining_tokens / g4.total_tokens * 100) : 0;
+        html += `<div class="quota-row">
+          <span class="quota-label">G4</span>
+          <div class="quota-bar-mini"><div class="quota-fill quota-fill-blue" style="width:${g4pct}%"></div></div>
+          <span class="quota-num">${g4.remaining_tokens}/${g4.total_tokens}</span>
+        </div>`;
+      }
+      html += '</div>';
+      tdQuota.innerHTML = html;
+    } else {
+      // 降级：显示旧的单一 quota
+      tdQuota.className = 'text-center font-mono text-xs';
+      tdQuota.innerText = item.quota;
+    }
 
     // Note (Left)
     const tdNote = document.createElement('td');

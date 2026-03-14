@@ -7,9 +7,10 @@ from typing import Callable, Awaitable, Dict, Any, Optional, List
 
 from app.core.logger import logger
 from app.core.config import get_config
-from app.services.reverse.rate_limits import RateLimitsReverse
+from app.services.reverse.rate_limits import RateLimitsReverse, BUCKET_MODELS, PROBE_MODELS
 from app.services.reverse.utils.session import ResettableSession
 from app.core.batch import run_batch
+from app.services.token.models import BucketQuota
 
 _USAGE_SEMAPHORE = None
 _USAGE_SEM_VALUE = None
@@ -24,15 +25,42 @@ def _get_usage_semaphore() -> asyncio.Semaphore:
     return _USAGE_SEMAPHORE
 
 
+def _parse_bucket_quota(data: dict) -> Optional[BucketQuota]:
+    """Parse a rate-limits response into a BucketQuota (for grok-3 / grok-4 buckets)."""
+    if not data or "remainingTokens" not in data:
+        return None
+    low = data.get("lowEffortRateLimits") or {}
+    high = data.get("highEffortRateLimits") or {}
+    return BucketQuota(
+        remaining_tokens=data.get("remainingTokens", 0),
+        total_tokens=data.get("totalTokens", 0),
+        low_remaining=low.get("remainingQueries", 0),
+        low_total=low.get("totalQueries", 0),
+        high_remaining=high.get("remainingQueries", 0),
+        high_total=high.get("totalQueries", 0),
+    )
+
+
+def _parse_probe_queries(data: dict) -> Optional[int]:
+    """Parse a rate-limits response for probe models (grok-4.1 / grok-420)."""
+    if not data:
+        return None
+    remaining = data.get("remainingQueries")
+    if remaining is None:
+        remaining = data.get("remainingTokens")
+    return remaining
+
+
 class UsageService:
     """用量查询服务"""
 
-    async def get(self, token: str) -> Dict:
+    async def get(self, token: str, model_name: str = "grok-3") -> Dict:
         """
         获取速率限制信息
 
         Args:
             token: 认证 Token
+            model_name: 模型名称
 
         Returns:
             响应数据
@@ -48,7 +76,7 @@ class UsageService:
                 else:
                     session_ctx = ResettableSession()
                 async with session_ctx as session:
-                    response = await RateLimitsReverse.request(session, token)
+                    response = await RateLimitsReverse.request(session, token, model_name)
                 data = response.json()
                 remaining = data.get("remainingTokens")
                 if remaining is None:
@@ -56,13 +84,61 @@ class UsageService:
                     if remaining is not None:
                         data["remainingTokens"] = remaining
                 logger.info(
-                    f"Usage sync success: remaining={remaining}, token={token[:10]}..."
+                    f"Usage sync success: model={model_name}, remaining={remaining}, token={token[:10]}..."
                 )
                 return data
 
             except Exception:
                 # 最后一次失败已经被记录
                 raise
+
+    async def get_multi(self, token: str) -> Dict[str, Any]:
+        """
+        获取所有桶的速率限制信息
+
+        Returns:
+            {
+                "grok3_quota": BucketQuota or None,
+                "grok4_quota": BucketQuota or None,
+                "grok41_queries": int or None,
+                "grok420_queries": int or None,
+                "raw": { model_name: data, ... },
+                "remainingTokens": int  # grok-3 remaining for backward compat
+            }
+        """
+        async with _get_usage_semaphore():
+            browser = get_config("proxy.browser")
+            if browser:
+                session_ctx = ResettableSession(impersonate=browser)
+            else:
+                session_ctx = ResettableSession()
+            async with session_ctx as session:
+                raw = await RateLimitsReverse.request_multi(session, token)
+
+        # Parse buckets
+        grok3_quota = _parse_bucket_quota(raw.get("grok-3"))
+        grok4_quota = _parse_bucket_quota(raw.get("grok-4"))
+        grok41_queries = _parse_probe_queries(raw.get("grok-4-1-thinking-1129"))
+        grok420_queries = _parse_probe_queries(raw.get("grok-420"))
+
+        # Backward compat: use grok-3 remainingTokens as the primary quota
+        remaining_tokens = grok3_quota.remaining_tokens if grok3_quota else None
+
+        logger.info(
+            f"Usage multi-sync: token={token[:10]}..., "
+            f"g3={grok3_quota.remaining_tokens if grok3_quota else '?'}/{grok3_quota.total_tokens if grok3_quota else '?'}, "
+            f"g4={grok4_quota.remaining_tokens if grok4_quota else '?'}/{grok4_quota.total_tokens if grok4_quota else '?'}, "
+            f"g41q={grok41_queries}, g420q={grok420_queries}"
+        )
+
+        return {
+            "grok3_quota": grok3_quota,
+            "grok4_quota": grok4_quota,
+            "grok41_queries": grok41_queries,
+            "grok420_queries": grok420_queries,
+            "remainingTokens": remaining_tokens,
+            "raw": raw,
+        }
 
 
     @staticmethod

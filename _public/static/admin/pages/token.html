@@ -10,6 +10,7 @@
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-mono/style.css" rel="stylesheet">
   <link href="/static/common/css/common.css?v=1.6.0" rel="stylesheet">
+  <link href="/static/common/css/shared-table.css?v=1.6.1" rel="stylesheet">
   <link href="/static/admin/css/token.css?v=1.6.0" rel="stylesheet">
   <link href="/static/common/css/toast.css" rel="stylesheet">
 </head>
@@ -70,23 +71,44 @@
           <div class="stat-label" data-i18n="token.statInvalid">Token 失效</div>
         </div>
 
-        <!-- Row 2 -->
+        <!-- Row 2: Chat 桶额度 -->
         <div class="stat-card">
-          <div class="stat-value" id="stat-chat-quota">-</div>
-          <div class="stat-label" data-i18n="token.statChatQuota">Chat 剩余</div>
+          <div class="stat-value" id="stat-grok3-quota">-</div>
+          <div class="stat-label">Grok-3 剩余</div>
+          <div class="quota-bar" id="stat-grok3-bar"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-value text-blue-600" id="stat-image-quota">-</div>
-          <div class="stat-label" data-i18n="token.statImageQuota">Image 剩余</div>
+          <div class="stat-value text-blue-600" id="stat-grok4-quota">-</div>
+          <div class="stat-label">Grok-4 剩余</div>
+          <div class="quota-bar" id="stat-grok4-bar"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-value text-gray-400" id="stat-video-quota" data-i18n="token.statVideoUnavailable">无法统计</div>
-          <div class="stat-label" data-i18n="token.statVideoQuota">Video 剩余</div>
+          <div class="stat-value text-amber-500" id="stat-grok41-quota">-</div>
+          <div class="stat-label">Grok-4.1 探针</div>
+          <div class="stat-hint">⚠️ 仅参考</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-total-calls">-</div>
           <div class="stat-label" data-i18n="token.statTotalCalls">总调用次数</div>
         </div>
+
+        <!-- Row 3: Image / Video / Edit -->
+        <div class="stat-card">
+          <div class="stat-value text-purple-600" id="stat-image-quota">-</div>
+          <div class="stat-label">Image 剩余</div>
+          <div class="stat-hint">= Grok-3 high 桶</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value text-indigo-600" id="stat-video-quota">-</div>
+          <div class="stat-label">Video 剩余</div>
+          <div class="stat-hint">= Grok-3 high 桶</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value text-orange-500" id="stat-edit-quota">-</div>
+          <div class="stat-label">Image Edit</div>
+          <div class="stat-hint">⚠️ 独立上游</div>
+        </div>
+        <div class="stat-card"></div>
       </div>
 
       <!-- Tab Filter (with ARIA) -->
