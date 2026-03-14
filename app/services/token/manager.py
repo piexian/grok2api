@@ -491,7 +491,7 @@ class TokenManager:
         is_usage: bool = True,
     ) -> bool:
         """
-        同步 Token 用量
+        同步 Token 用量（多桶）
 
         优先从 API 获取最新配额，失败则降级到本地预估
 
@@ -519,60 +519,77 @@ class TokenManager:
             logger.warning(f"Token {raw_token[:10]}...: not found for sync")
             return False
 
-        # 尝试 API 同步
+        # 尝试 API 多桶同步
         try:
             usage_service = UsageService()
-            result = await usage_service.get(token_str)
+            result = await usage_service.get_multi(token_str)
 
-            if result and "remainingTokens" in result:
-                new_quota = result.get("remainingTokens")
-                if new_quota is None:
-                    new_quota = result.get("remainingQueries")
-                if new_quota is None:
+            # 写入分桶数据
+            grok3_quota = result.get("grok3_quota")
+            grok4_quota = result.get("grok4_quota")
+            grok41_queries = result.get("grok41_queries")
+            grok420_queries = result.get("grok420_queries")
+
+            target_token.grok3_quota = grok3_quota
+            target_token.grok4_quota = grok4_quota
+            target_token.grok41_queries = grok41_queries
+            target_token.grok420_queries = grok420_queries
+
+            # 向后兼容：quota 字段使用 grok-3 remainingTokens
+            new_quota = result.get("remainingTokens")
+            if new_quota is None:
+                # Fallback: 如果 grok-3 查询失败，尝试其他方式
+                if grok3_quota:
+                    new_quota = grok3_quota.remaining_tokens
+                else:
                     return False
-                old_quota = target_token.quota
-                old_status = target_token.status
 
-                target_token.update_quota(new_quota)
-                target_token.record_success(is_usage=is_usage)
-                target_token.mark_synced()
+            old_quota = target_token.quota
+            old_status = target_token.status
 
-                window_size = self._extract_window_size_seconds(result)
-                if window_size is not None:
-                    if (
-                        target_pool_name == SUPER_POOL_NAME
-                        and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            SUPER_POOL_NAME,
-                            BASIC_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
-                    elif (
-                        target_pool_name == BASIC_POOL_NAME
-                        and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            BASIC_POOL_NAME,
-                            SUPER_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
+            target_token.update_quota(new_quota)
+            target_token.record_success(is_usage=is_usage)
+            target_token.mark_synced()
 
-                consumed = max(0, old_quota - new_quota)
-                logger.info(
-                    f"Token {raw_token[:10]}...: synced quota "
-                    f"{old_quota} -> {new_quota} (consumed: {consumed}, use_count: {target_token.use_count})"
-                )
-
-                if target_pool_name:
-                    change_kind = "state" if target_token.status != old_status else "usage"
-                    self._track_token_change(
-                        target_token, target_pool_name, change_kind
+            # Pool migration: 使用 grok-3 原始响应中的 windowSizeSeconds
+            raw_data = result.get("raw", {})
+            grok3_raw = raw_data.get("grok-3") or {}
+            window_size = self._extract_window_size_seconds(grok3_raw)
+            if window_size is not None:
+                if (
+                    target_pool_name == SUPER_POOL_NAME
+                    and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
+                ):
+                    target_pool_name = self._move_token_pool(
+                        target_token,
+                        SUPER_POOL_NAME,
+                        BASIC_POOL_NAME,
+                        reason=f"windowSizeSeconds={window_size}",
                     )
-                self._schedule_save()
-                return True
+                elif (
+                    target_pool_name == BASIC_POOL_NAME
+                    and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
+                ):
+                    target_pool_name = self._move_token_pool(
+                        target_token,
+                        BASIC_POOL_NAME,
+                        SUPER_POOL_NAME,
+                        reason=f"windowSizeSeconds={window_size}",
+                    )
+
+            consumed = max(0, old_quota - new_quota)
+            logger.info(
+                f"Token {raw_token[:10]}...: synced quota "
+                f"{old_quota} -> {new_quota} (consumed: {consumed}, use_count: {target_token.use_count})"
+            )
+
+            if target_pool_name:
+                change_kind = "state" if target_token.status != old_status else "usage"
+                self._track_token_change(
+                    target_token, target_pool_name, change_kind
+                )
+            self._schedule_save()
+            return True
 
         except Exception as e:
             if isinstance(e, UpstreamException):

@@ -389,3 +389,67 @@
         max-height: 72px;
       }
     }
+
+    /* 分桶额度展示 */
+    .quota-multi {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 140px;
+    }
+    .quota-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .quota-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accents-5);
+      width: 20px;
+      flex-shrink: 0;
+    }
+    .quota-bar-mini {
+      flex: 1;
+      height: 6px;
+      background: #f3f4f6;
+      border-radius: 3px;
+      overflow: hidden;
+      min-width: 60px;
+    }
+    .quota-fill {
+      height: 100%;
+      background: #10b981;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    .quota-fill-blue {
+      background: #3b82f6;
+    }
+    .quota-num {
+      font-size: 10px;
+      font-family: 'Geist Mono', monospace;
+      color: var(--accents-5);
+      min-width: 50px;
+      text-align: right;
+    }
+
+    /* 统计区进度条 */
+    .stat-card .quota-bar {
+      margin-top: 6px;
+      height: 4px;
+      background: #f3f4f6;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .stat-card .quota-bar .fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .stat-hint {
+      font-size: 10px;
+      color: var(--accents-4);
+      margin-top: 4px;
+    }
+
