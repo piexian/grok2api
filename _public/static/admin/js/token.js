@@ -158,7 +158,11 @@ function processTokens(data) {
             last_fail_at: t.last_fail_at,
             last_fail_reason: t.last_fail_reason,
             last_sync_at: t.last_sync_at,
-            last_asset_clear_at: t.last_asset_clear_at
+            last_asset_clear_at: t.last_asset_clear_at,
+            grok3_quota: t.grok3_quota || null,
+            grok4_quota: t.grok4_quota || null,
+            grok41_queries: t.grok41_queries,
+            grok420_queries: t.grok420_queries
           };
         flatTokens.push({ ...tObj, pool: pool, _selected: false });
       });
@@ -227,11 +231,11 @@ function updateStats(data) {
 
   // Row 2: Chat 桶
   if (hasBucketData) {
-    setText('stat-grok3-quota', `${grok3Remaining} / ${grok3Total}`);
+    setText('stat-grok3-quota', grok3Remaining.toLocaleString());
     setBar('stat-grok3-bar', grok3Remaining, grok3Total, '#10b981');
-    setText('stat-grok4-quota', `${grok4Remaining} / ${grok4Total}`);
+    setText('stat-grok4-quota', grok4Remaining.toLocaleString());
     setBar('stat-grok4-bar', grok4Remaining, grok4Total, '#3b82f6');
-    setText('stat-grok41-quota', `${grok41Queries} queries`);
+    setText('stat-grok41-quota', grok41Queries.toLocaleString());
   } else {
     // 降级: 显示旧的 chatQuota
     setText('stat-grok3-quota', legacyChatQuota.toLocaleString());
@@ -244,10 +248,12 @@ function updateStats(data) {
 
   // Row 3: Image / Video / Edit
   if (hasBucketData) {
-    setText('stat-image-quota', `${grok3HighRemaining}`);
-    setText('stat-video-quota', `${grok3HighRemaining}`);
+    // Image ≈ grok3 remaining / 2
+    setText('stat-image-quota', Math.floor(grok3Remaining / 2).toLocaleString());
+    // Video: 消耗未知
+    setText('stat-video-quota', '未知');
     const editAvailable = activeTokens - editCooldownCount;
-    setText('stat-edit-quota', editAvailable > 0 ? `${editAvailable} 可用` : '冷却中');
+    setText('stat-edit-quota', editAvailable > 0 ? editAvailable.toLocaleString() : '0');
   } else {
     const imageQuota = Math.floor(legacyChatQuota / 2);
     setText('stat-image-quota', imageQuota.toLocaleString());
@@ -345,35 +351,48 @@ function renderTable() {
     }
     tdStatus.innerHTML = statusHtml;
 
-    // Quota (多桶展示)
-    const tdQuota = document.createElement('td');
-    if (item.grok3_quota || item.grok4_quota) {
-      tdQuota.className = 'text-left text-xs';
-      let html = '<div class="quota-multi">';
-      if (item.grok3_quota) {
-        const g3 = item.grok3_quota;
-        const g3pct = g3.total_tokens ? Math.round(g3.remaining_tokens / g3.total_tokens * 100) : 0;
-        html += `<div class="quota-row">
-          <span class="quota-label">G3</span>
-          <div class="quota-bar-mini"><div class="quota-fill" style="width:${g3pct}%"></div></div>
-          <span class="quota-num">${g3.remaining_tokens}/${g3.total_tokens}</span>
-        </div>`;
-      }
-      if (item.grok4_quota) {
-        const g4 = item.grok4_quota;
-        const g4pct = g4.total_tokens ? Math.round(g4.remaining_tokens / g4.total_tokens * 100) : 0;
-        html += `<div class="quota-row">
-          <span class="quota-label">G4</span>
-          <div class="quota-bar-mini"><div class="quota-fill quota-fill-blue" style="width:${g4pct}%"></div></div>
-          <span class="quota-num">${g4.remaining_tokens}/${g4.total_tokens}</span>
-        </div>`;
-      }
-      html += '</div>';
-      tdQuota.innerHTML = html;
+    // G3 quota
+    const tdG3 = document.createElement('td');
+    tdG3.className = 'text-center font-mono text-xs';
+    if (item.grok3_quota) {
+      tdG3.innerText = item.grok3_quota.remaining_tokens;
+      if (item.grok3_quota.remaining_tokens === 0) tdG3.classList.add('text-red-500');
     } else {
-      // 降级：显示旧的单一 quota
-      tdQuota.className = 'text-center font-mono text-xs';
-      tdQuota.innerText = item.quota;
+      tdG3.innerText = item.quota != null ? item.quota : '-';
+      tdG3.classList.add('text-gray-400');
+    }
+
+    // G4 quota
+    const tdG4 = document.createElement('td');
+    tdG4.className = 'text-center font-mono text-xs';
+    if (item.grok4_quota) {
+      tdG4.innerText = item.grok4_quota.remaining_tokens;
+      if (item.grok4_quota.remaining_tokens === 0) tdG4.classList.add('text-red-500');
+    } else {
+      tdG4.innerText = '-';
+      tdG4.classList.add('text-gray-400');
+    }
+
+    // G4.1 probe
+    const tdG41 = document.createElement('td');
+    tdG41.className = 'text-center font-mono text-xs';
+    if (item.grok41_queries != null) {
+      tdG41.innerText = item.grok41_queries;
+      if (item.grok41_queries === 0) tdG41.classList.add('text-red-500');
+    } else {
+      tdG41.innerText = '-';
+      tdG41.classList.add('text-gray-400');
+    }
+
+    // G4.2 (grok-420) probe
+    const tdG42 = document.createElement('td');
+    tdG42.className = 'text-center font-mono text-xs';
+    if (item.grok420_queries != null) {
+      tdG42.innerText = item.grok420_queries;
+      if (item.grok420_queries === 0) tdG42.classList.add('text-red-500');
+    } else {
+      tdG42.innerText = '-';
+      tdG42.classList.add('text-gray-400');
     }
 
     // Note (Left)
@@ -413,7 +432,10 @@ function renderTable() {
     tr.appendChild(tdToken);
     tr.appendChild(tdType);
     tr.appendChild(tdStatus);
-    tr.appendChild(tdQuota);
+    tr.appendChild(tdG3);
+    tr.appendChild(tdG4);
+    tr.appendChild(tdG41);
+    tr.appendChild(tdG42);
     tr.appendChild(tdNote);
     tr.appendChild(tdActions);
 

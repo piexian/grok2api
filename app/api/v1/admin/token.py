@@ -17,10 +17,37 @@ router = APIRouter()
 
 @router.get("/tokens", dependencies=[Depends(verify_app_key)])
 async def get_tokens():
-    """获取所有 Token"""
+    """获取所有 Token（从存储加载 + 注入内存中的分桶额度数据）"""
     storage = get_storage()
-    tokens = await storage.load_tokens()
-    return tokens or {}
+    tokens = await storage.load_tokens() or {}
+
+    # 从内存池注入分桶额度字段（避免 3500 对象全量 model_dump）
+    try:
+        mgr = await get_token_manager()
+        for pool_name, pool in mgr.pools.items():
+            if pool_name not in tokens or not isinstance(tokens[pool_name], list):
+                continue
+            # 建立 token -> TokenInfo 快速索引
+            mem_map = {t.token: t for t in pool.tokens}
+            for item in tokens[pool_name]:
+                if not isinstance(item, dict):
+                    continue
+                raw_token = item.get("token", "")
+                if raw_token.startswith("sso="):
+                    raw_token = raw_token[4:]
+                ti = mem_map.get(raw_token)
+                if ti:
+                    item["grok3_quota"] = ti.grok3_quota.model_dump() if ti.grok3_quota else None
+                    item["grok4_quota"] = ti.grok4_quota.model_dump() if ti.grok4_quota else None
+                    item["grok41_queries"] = ti.grok41_queries
+                    item["grok420_queries"] = ti.grok420_queries
+                    item["quota"] = ti.quota
+                    item["status"] = ti.status.value if hasattr(ti.status, 'value') else ti.status
+                    item["use_count"] = ti.use_count
+    except Exception:
+        pass
+
+    return tokens
 
 
 @router.post("/tokens", dependencies=[Depends(verify_app_key)])

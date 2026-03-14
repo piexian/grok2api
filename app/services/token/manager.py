@@ -876,10 +876,16 @@ class TokenManager:
                     DEFAULT_SUPER_REFRESH_INTERVAL_HOURS,
                 )
             else:
-                interval_hours = get_config(
+                # 普号：取各桶最短间隔，确保所有桶数据新鲜
+                g3_h = get_config("token.refresh_interval_g3_hours", None)
+                g4_h = get_config("token.refresh_interval_g4_hours", None)
+                g41_h = get_config("token.refresh_interval_g41_hours", None)
+                fallback = get_config(
                     "token.refresh_interval_hours",
                     DEFAULT_REFRESH_INTERVAL_HOURS,
                 )
+                per_bucket = [h for h in [g3_h, g4_h, g41_h] if h is not None]
+                interval_hours = min(per_bucket) if per_bucket else fallback
             for token in pool:
                 if token.need_refresh(interval_hours):
                     to_refresh.append((pool.name, token))

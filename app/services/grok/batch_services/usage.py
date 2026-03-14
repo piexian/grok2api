@@ -27,13 +27,23 @@ def _get_usage_semaphore() -> asyncio.Semaphore:
 
 def _parse_bucket_quota(data: dict) -> Optional[BucketQuota]:
     """Parse a rate-limits response into a BucketQuota (for grok-3 / grok-4 buckets)."""
-    if not data or "remainingTokens" not in data:
+    if not data:
+        return None
+    # The upstream API may return `remainingTokens` or `remainingQueries` at top level
+    remaining_tokens = data.get("remainingTokens")
+    total_tokens = data.get("totalTokens")
+    if remaining_tokens is None:
+        remaining_tokens = data.get("remainingQueries")
+    if total_tokens is None:
+        total_tokens = data.get("totalQueries")
+    if remaining_tokens is None:
+        logger.debug(f"_parse_bucket_quota: no remaining field found, keys={list(data.keys())}")
         return None
     low = data.get("lowEffortRateLimits") or {}
     high = data.get("highEffortRateLimits") or {}
     return BucketQuota(
-        remaining_tokens=data.get("remainingTokens", 0),
-        total_tokens=data.get("totalTokens", 0),
+        remaining_tokens=remaining_tokens or 0,
+        total_tokens=total_tokens or 0,
         low_remaining=low.get("remainingQueries", 0),
         low_total=low.get("totalQueries", 0),
         high_remaining=high.get("remainingQueries", 0),

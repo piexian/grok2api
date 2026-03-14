@@ -100,8 +100,12 @@ docker compose up -d
 
 ## 可用次数
 
-- Basic 账号：80 次 / 20h
-- Super 账号：140 次 / 2h
+| 模型 | Basic 额度 | Basic 窗口 | Super 额度 | Super 窗口 |
+| :-- | :--: | :--: | :--: | :--: |
+| grok-3 | 60 次 | 20h | 140 次 | 2h |
+| grok-4 | 8 次 | 10h | 50 次 | 2h |
+| grok-4.1 | 8 次 | 4h | 40 次 | 2h |
+| grok-4.20 | 8 次 | 4h | 40 次 | 2h |
 
 <br>
 
@@ -381,8 +385,11 @@ curl http://localhost:8000/v1/images/edits \
 |  | `retry_backoff_max` | 退避上限 | 单次重试等待的最大延迟（秒）。 | `20.0` |
 |  | `retry_budget` | 退避预算 | 单次请求的最大重试总耗时（秒）。 | `60.0` |
 | **token** | `auto_refresh` | 自动刷新 | 是否开启 Token 自动刷新机制。 | `true` |
-|  | `refresh_interval_hours` | 刷新间隔 | 普通 Token 刷新的时间间隔（小时）。 | `8` |
-|  | `super_refresh_interval_hours` | Super 刷新间隔 | Super Token 刷新的时间间隔（小时）。 | `2` |
+|  | `refresh_interval_hours` | 刷新间隔 | 普通 Token 默认刷新间隔（小时），作为兜底值。 | `8` |
+|  | `refresh_interval_g3_hours` | G3 刷新间隔 | 普通 Token grok-3 桶刷新间隔（小时），窗口 20h。 | `18` |
+|  | `refresh_interval_g4_hours` | G4 刷新间隔 | 普通 Token grok-4 桶刷新间隔（小时），窗口 10h。 | `8` |
+|  | `refresh_interval_g41_hours` | G4.1 刷新间隔 | 普通 Token grok-4.1/4.20 桶刷新间隔（小时），窗口 4h。 | `3` |
+|  | `super_refresh_interval_hours` | Super 刷新间隔 | Super Token 刷新的时间间隔（小时），所有桶窗口均 2h。 | `2` |
 |  | `fail_threshold` | 失败阈值 | 单个 Token 连续失败多少次后被标记为不可用。 | `5` |
 |  | `save_delay_ms` | 保存延迟 | Token 变更合并写入的延迟（毫秒）。 | `500` |
 |  | `usage_flush_interval_sec` | 用量落库间隔 | 用量类字段写入数据库的最小间隔（秒）。 | `5` |
