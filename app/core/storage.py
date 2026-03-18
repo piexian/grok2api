@@ -1498,6 +1498,15 @@ class StorageFactory:
                 raise ValueError("Redis 存储需要设置 SERVER_STORAGE_URL")
             cls._instance = RedisStorage(storage_url)
 
+        elif storage_type == "sqlite":
+            # SQLite 支持：自动创建数据库文件和目录
+            db_path = cls._prepare_sqlite_path(storage_url)
+            storage_url = f"sqlite+aiosqlite:///{db_path}"
+            logger.info(f"SQLite 数据库路径: {db_path}")
+            cls._instance = SQLStorage(
+                storage_url, connect_args={"check_same_thread": False}
+            )
+
         elif storage_type in ("mysql", "pgsql"):
             if not storage_url:
                 raise ValueError("SQL 存储需要设置 SERVER_STORAGE_URL")
@@ -1512,6 +1521,51 @@ class StorageFactory:
             cls._instance = LocalStorage()
 
         return cls._instance
+
+    @classmethod
+    def _prepare_sqlite_path(cls, storage_url: str = "") -> str:
+        """
+        准备 SQLite 数据库路径
+
+        Args:
+            storage_url: 可选的自定义路径或文件名
+                        支持格式：
+                        - 空: 使用默认 data/grok2api.db
+                        - 文件名: data/{filename}
+                        - 相对/绝对路径: 直接使用
+                        - DSN 格式: sqlite:///path/to/db 或 sqlite:///:memory:
+
+        Returns:
+            绝对路径的数据库文件路径（或 ":memory:"）
+        """
+        # 处理 DSN 格式 (sqlite:///path 或 sqlite:///:memory:)
+        if storage_url.startswith("sqlite://"):
+            path_part = storage_url[len("sqlite://") :]
+            # 处理 :memory: 特殊情况
+            if path_part == ":memory:" or path_part == "/:memory:":
+                return ":memory:"
+            db_file = path_part
+        elif not storage_url:
+            db_file = "grok2api.db"
+        else:
+            db_file = storage_url
+
+        # 如果不是绝对路径，放到 DATA_DIR 下
+        db_path = Path(db_file)
+        if not db_path.is_absolute():
+            db_path = DATA_DIR / db_file
+
+        # 确保目录存在
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 如果文件不存在，创建并设置权限
+        if not db_path.exists():
+            db_path.touch()
+            # 仅 owner 可读写 (安全考虑)
+            db_path.chmod(0o600)
+            logger.info(f"创建 SQLite 数据库文件: {db_path}")
+
+        return str(db_path)
 
 
 def get_storage() -> BaseStorage:
