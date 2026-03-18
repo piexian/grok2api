@@ -48,6 +48,7 @@ async def get_tokens():
     """获取所有 Token"""
     # 获取消耗模式配置
     from app.core.config import get_config
+
     mgr = await get_token_manager()
     results = {}
     for pool_name, pool in mgr.pools.items():
@@ -92,7 +93,7 @@ async def update_tokens(data: dict):
             for pool_name, tokens in (data or {}).items():
                 if not isinstance(tokens, list):
                     continue
-                pool_list = []
+                pool_map = {}
                 for item in tokens:
                     if isinstance(item, str):
                         token_data = {"token": item}
@@ -119,11 +120,17 @@ async def update_tokens(data: dict):
                     filtered = {k: v for k, v in merged.items() if k in allowed_fields}
                     try:
                         info = TokenInfo(**filtered)
-                        pool_list.append(info.model_dump())
+                        token_key = info.token
+                        if token_key in pool_map:
+                            logger.warning(
+                                f"Duplicate token in pool '{pool_name}' payload: "
+                                f"keeping last occurrence for {token_key[:10]}..."
+                            )
+                        pool_map[token_key] = info.model_dump()
                     except Exception as e:
                         logger.warning(f"Skip invalid token in pool '{pool_name}': {e}")
                         continue
-                normalized[pool_name] = pool_list
+                normalized[pool_name] = list(pool_map.values())
 
             await storage.save_tokens(normalized)
             mgr = await get_token_manager()
@@ -228,9 +235,11 @@ async def refresh_tokens_async(data: dict):
             task.fail_task(str(e))
         finally:
             import asyncio
+
             asyncio.create_task(expire_task(task.id, 300))
 
     import asyncio
+
     asyncio.create_task(_run())
 
     return {
@@ -422,9 +431,11 @@ async def enable_nsfw_async(data: dict):
             task.fail_task(str(e))
         finally:
             import asyncio
+
             asyncio.create_task(expire_task(task.id, 300))
 
     import asyncio
+
     asyncio.create_task(_run())
 
     return {

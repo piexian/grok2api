@@ -593,6 +593,7 @@ class SQLStorage(BaseStorage):
             )
 
         self.dialect = url.split(":", 1)[0].split("+", 1)[0].lower()
+        self._local_lock = asyncio.Lock()
 
         # 配置 robust 的连接池
         self.engine = create_async_engine(
@@ -797,6 +798,27 @@ class SQLStorage(BaseStorage):
             "updated_at": 0,
         }
 
+    def _dedupe_token_updates(
+        self, items: list[Dict[str, Any]], *, label: str
+    ) -> list[Dict[str, Any]]:
+        deduped: dict[str, Dict[str, Any]] = {}
+        duplicate_count = 0
+
+        for item in items:
+            token_str = item.get("token")
+            if not token_str:
+                continue
+            if token_str in deduped:
+                duplicate_count += 1
+            deduped[token_str] = item
+
+        if duplicate_count:
+            logger.warning(
+                f"SQLStorage: {label} 中发现 {duplicate_count} 个重复 Token，已按最后一次出现去重"
+            )
+
+        return list(deduped.values())
+
     async def _migrate_legacy_tokens(self):
         """将旧版 data JSON 回填到平铺字段"""
         from sqlalchemy import text
@@ -929,6 +951,14 @@ class SQLStorage(BaseStorage):
                         await session.commit()
                     except Exception:
                         pass
+        elif self.dialect == "sqlite":
+            try:
+                async with asyncio.timeout(timeout):
+                    async with self._local_lock:
+                        yield
+            except asyncio.TimeoutError:
+                logger.warning(f"SQLStorage(SQLite): 获取锁 '{name}' 超时 ({timeout}s)")
+                raise StorageError(f"无法获取锁 '{name}'")
         else:
             yield
 
@@ -1087,7 +1117,7 @@ class SQLStorage(BaseStorage):
         if data is None:
             return
 
-        updates = []
+        updates_by_token = {}
         new_tokens = set()
         for pool_name, tokens in (data or {}).items():
             for t in tokens:
@@ -1105,8 +1135,12 @@ class SQLStorage(BaseStorage):
                 token_data["token"] = token_str
                 token_data["pool_name"] = pool_name
                 token_data["_update_kind"] = "state"
-                updates.append(token_data)
+                updates_by_token[token_str] = token_data
                 new_tokens.add(token_str)
+
+        updates = self._dedupe_token_updates(
+            list(updates_by_token.values()), label="全量保存"
+        )
 
         try:
             existing_tokens = set()
@@ -1145,8 +1179,8 @@ class SQLStorage(BaseStorage):
                         chunk = deleted_list[i : i + chunk_size]
                         await session.execute(delete_stmt, {"tokens": chunk})
 
-                updates = []
-                usage_updates = []
+                state_rows_by_token = {}
+                usage_rows_by_token = {}
 
                 for item in updated or []:
                     if not isinstance(item, dict):
@@ -1155,6 +1189,8 @@ class SQLStorage(BaseStorage):
                     token_str = item.get("token")
                     if not pool_name or not token_str:
                         continue
+                    if isinstance(token_str, str) and token_str.startswith("sso="):
+                        token_str = token_str[4:]
                     if token_str in deleted_set:
                         continue
                     update_kind = item.get("_update_kind", "state")
@@ -1163,11 +1199,21 @@ class SQLStorage(BaseStorage):
                         for k, v in item.items()
                         if k not in ("pool_name", "_update_kind")
                     }
+                    token_data["token"] = token_str
                     row = self._token_to_row(token_data, pool_name)
                     if update_kind == "usage":
-                        usage_updates.append(row)
+                        usage_rows_by_token[token_str] = row
                     else:
-                        updates.append(row)
+                        state_rows_by_token[token_str] = row
+
+                updates = self._dedupe_token_updates(
+                    list(state_rows_by_token.values()), label="增量状态保存"
+                )
+                for token_str in state_rows_by_token:
+                    usage_rows_by_token.pop(token_str, None)
+                usage_updates = self._dedupe_token_updates(
+                    list(usage_rows_by_token.values()), label="增量用量保存"
+                )
 
                 if updates:
                     if self.dialect in ("mysql", "mariadb"):
