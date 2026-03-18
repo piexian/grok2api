@@ -13,6 +13,7 @@ let currentBatchTaskId = null;
 let batchEventSource = null;
 let currentPage = 1;
 let pageSize = 50;
+let storageInfo = null;
 
 const byId = (id) => document.getElementById(id);
 const qsa = (selector) => document.querySelectorAll(selector);
@@ -114,7 +115,7 @@ async function init() {
   setupConfirmDialog();
   setupSelectAllMenu();
   refreshPageSizeOptionsI18n();
-  loadData();
+  await Promise.all([loadData(), loadStorageInfo()]);
 }
 
 async function loadData() {
@@ -126,9 +127,9 @@ async function loadData() {
       const data = await res.json();
       allTokens = data.tokens;
       consumedModeEnabled = data.consumed_mode_enabled || false;
-      updateQuotaHeader();
       processTokens(data.tokens);
-      updateStats(data.tokens);
+      updateQuotaHeader();
+      updateStats();
       renderTable();
     } else if (res.status === 401) {
       logout();
@@ -137,6 +138,22 @@ async function loadData() {
     }
   } catch (e) {
     showToast(t('common.loadError', { msg: e.message }), 'error');
+  }
+}
+
+async function loadStorageInfo() {
+  try {
+    const res = await fetch('/v1/admin/storage', {
+      headers: buildAuthHeaders(apiKey)
+    });
+    if (res.ok) {
+      storageInfo = await res.json();
+      updateStorageCard();
+    } else if (res.status === 401) {
+      logout();
+    }
+  } catch (_) {
+    updateStorageCard();
   }
 }
 
@@ -159,6 +176,11 @@ function processTokens(data) {
             fail_count: t.fail_count || 0,
             use_count: t.use_count || 0,
             tags: t.tags || [],
+            grok3_quota: t.grok3_quota || null,
+            grok4_quota: t.grok4_quota || null,
+            grok41_queries: t.grok41_queries,
+            grok420_queries: t.grok420_queries,
+            model_cooldowns: t.model_cooldowns || {},
             created_at: t.created_at,
             last_used_at: t.last_used_at,
             last_fail_at: t.last_fail_at,
@@ -172,10 +194,17 @@ function processTokens(data) {
   });
 }
 
+function hasBucketQuotaData(item) {
+  return !!(item && (item.grok3_quota || item.grok4_quota));
+}
+
 function updateQuotaHeader() {
   const thQuota = document.getElementById('th-quota');
   if (thQuota) {
-    if (consumedModeEnabled) {
+    if (flatTokens.some(hasBucketQuotaData)) {
+      thQuota.textContent = t('token.tableBucketQuota');
+      thQuota.dataset.i18n = 'token.tableBucketQuota';
+    } else if (consumedModeEnabled) {
       thQuota.textContent = t('token.tableQuotaConsumed');
       thQuota.dataset.i18n = 'token.tableQuotaConsumed';
     } else {
@@ -185,21 +214,89 @@ function updateQuotaHeader() {
   }
 }
 
-function updateStats(data) {
-  // Logic same as before, simplified reuse if possible, but let's re-run on flatTokens
+function setBar(id, value, max, color) {
+  const el = byId(id);
+  if (!el) return;
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  el.innerHTML = `<div class="fill" style="width:${pct}%;background:${color}"></div>`;
+}
+
+function updateStorageCard() {
+  const storageType = storageInfo && storageInfo.type ? String(storageInfo.type).toLowerCase() : '';
+  const value = byId('stat-storage');
+  const hint = byId('stat-storage-hint');
+  if (!value || !hint) return;
+
+  if (!storageType) {
+    value.textContent = '-';
+    hint.textContent = t('token.statStorageUnavailable');
+    hint.removeAttribute('title');
+    return;
+  }
+
+  value.textContent = storageType.toUpperCase();
+  if (storageType === 'sqlite') {
+    const sqlitePath = storageInfo.path || (storageInfo.memory ? ':memory:' : '-');
+    hint.textContent = sqlitePath;
+    hint.title = sqlitePath;
+  } else if (storageType === 'local' && storageInfo.path) {
+    hint.textContent = storageInfo.path;
+    hint.title = storageInfo.path;
+  } else {
+    hint.textContent = t('token.statStorageExternal');
+    hint.removeAttribute('title');
+  }
+}
+
+function updateStats() {
   let totalTokens = flatTokens.length;
   let activeTokens = 0;
   let coolingTokens = 0;
   let invalidTokens = 0;
   let nsfwTokens = 0;
   let noNsfwTokens = 0;
-  let chatQuota = 0;
   let totalCalls = 0;
+  let legacyChatQuota = 0;
+
+  let grok3Total = 0;
+  let grok3Remaining = 0;
+  let grok3HighRemaining = 0;
+  let grok4Total = 0;
+  let grok4Remaining = 0;
+  let grok41Queries = 0;
+  let grok420Queries = 0;
+  let editCooldownCount = 0;
+  let hasBucketData = false;
 
   flatTokens.forEach(t => {
     if (t.status === 'active') {
       activeTokens++;
-      chatQuota += t.quota;
+      legacyChatQuota += t.quota;
+
+      if (t.grok3_quota) {
+        hasBucketData = true;
+        grok3Total += Number(t.grok3_quota.total_tokens || 0);
+        grok3Remaining += Number(t.grok3_quota.remaining_tokens || 0);
+        grok3HighRemaining += Number(t.grok3_quota.high_remaining || 0);
+      }
+      if (t.grok4_quota) {
+        hasBucketData = true;
+        grok4Total += Number(t.grok4_quota.total_tokens || 0);
+        grok4Remaining += Number(t.grok4_quota.remaining_tokens || 0);
+      }
+      if (t.grok41_queries != null) {
+        hasBucketData = true;
+        grok41Queries += Number(t.grok41_queries || 0);
+      }
+      if (t.grok420_queries != null) {
+        hasBucketData = true;
+        grok420Queries += Number(t.grok420_queries || 0);
+      }
+      const editCooldownUntil =
+        t.model_cooldowns && t.model_cooldowns['grok-imagine-1.0-edit'];
+      if (editCooldownUntil && editCooldownUntil > Date.now()) {
+        editCooldownCount++;
+      }
     } else if (t.status === 'cooling') {
       coolingTokens++;
     } else {
@@ -213,29 +310,47 @@ function updateStats(data) {
     totalCalls += Number(t.use_count || 0);
   });
 
-  const imageQuota = Math.floor(chatQuota / 2);
-  const totalConsumed = flatTokens.reduce((sum, t) => sum + (t.consumed || 0), 0);
+  const legacyImageQuota = Math.floor(legacyChatQuota / 2);
 
-  // 更新统计卡片 (这些不受 consumedMode 影响)
   setText('stat-total', totalTokens.toLocaleString());
   setText('stat-active', activeTokens.toLocaleString());
   setText('stat-cooling', coolingTokens.toLocaleString());
   setText('stat-invalid', invalidTokens.toLocaleString());
 
-  // 根据配置决定显示消耗还是剩余
-  if (consumedModeEnabled) {
-    setText('stat-chat-quota', totalConsumed.toLocaleString());
-    setText('stat-image-quota', Math.floor(totalConsumed / 2).toLocaleString());
-    const chatLabel = document.querySelector('[data-i18n="token.statChatQuota"]');
-    const imageLabel = document.querySelector('[data-i18n="token.statImageQuota"]');
-    if (chatLabel) chatLabel.textContent = t('token.statChatConsumed');
-    if (imageLabel) imageLabel.textContent = t('token.statImageConsumed');
+  if (hasBucketData) {
+    setText('stat-grok3-quota', `${grok3Remaining} / ${grok3Total}`);
+    setBar('stat-grok3-bar', grok3Remaining, grok3Total, '#10b981');
+    setText('stat-grok4-quota', `${grok4Remaining} / ${grok4Total}`);
+    setBar('stat-grok4-bar', grok4Remaining, grok4Total, '#3b82f6');
+    setText(
+      'stat-grok41-quota',
+      grok41Queries > 0
+        ? t('token.statProbeQueries', { count: grok41Queries })
+        : (grok420Queries > 0 ? t('token.statProbeQueries', { count: grok420Queries }) : '-')
+    );
+
+    setText('stat-image-quota', String(grok3HighRemaining));
+    setText('stat-video-quota', String(grok3HighRemaining));
+    const editAvailable = Math.max(0, activeTokens - editCooldownCount);
+    setText(
+      'stat-edit-quota',
+      editAvailable > 0
+        ? t('token.statEditAvailable', { count: editAvailable })
+        : t('token.statEditCooling')
+    );
   } else {
-    setText('stat-chat-quota', chatQuota.toLocaleString());
-    setText('stat-image-quota', imageQuota.toLocaleString());
+    setText('stat-grok3-quota', legacyChatQuota.toLocaleString());
+    setBar('stat-grok3-bar', 0, 0, '#10b981');
+    setText('stat-grok4-quota', '-');
+    setBar('stat-grok4-bar', 0, 0, '#3b82f6');
+    setText('stat-grok41-quota', '-');
+    setText('stat-image-quota', legacyImageQuota.toLocaleString());
+    setText('stat-video-quota', t('token.statVideoUnavailable'));
+    setText('stat-edit-quota', '-');
   }
 
   setText('stat-total-calls', totalCalls.toLocaleString());
+  updateStorageCard();
 
   updateTabCounts({
     all: totalTokens,
@@ -320,19 +435,41 @@ function renderTable() {
     }
     tdStatus.innerHTML = statusHtml;
 
-    // Quota (Center)
+    // Quota
     const tdQuota = document.createElement('td');
-    tdQuota.className = 'text-center font-mono text-xs';
-    // 根据配置决定显示消耗还是剩余
-    if (consumedModeEnabled) {
+    if (hasBucketQuotaData(item)) {
+      tdQuota.className = 'text-left text-xs';
+      let quotaHtml = '<div class="quota-multi">';
+      if (item.grok3_quota) {
+        const g3 = item.grok3_quota;
+        const g3Pct = g3.total_tokens ? Math.round((g3.remaining_tokens / g3.total_tokens) * 100) : 0;
+        quotaHtml += `<div class="quota-row">
+          <span class="quota-label">G3</span>
+          <div class="quota-bar-mini"><div class="quota-fill" style="width:${g3Pct}%"></div></div>
+          <span class="quota-num">${g3.remaining_tokens}/${g3.total_tokens}</span>
+        </div>`;
+      }
+      if (item.grok4_quota) {
+        const g4 = item.grok4_quota;
+        const g4Pct = g4.total_tokens ? Math.round((g4.remaining_tokens / g4.total_tokens) * 100) : 0;
+        quotaHtml += `<div class="quota-row">
+          <span class="quota-label">G4</span>
+          <div class="quota-bar-mini"><div class="quota-fill quota-fill-blue" style="width:${g4Pct}%"></div></div>
+          <span class="quota-num">${g4.remaining_tokens}/${g4.total_tokens}</span>
+        </div>`;
+      }
+      quotaHtml += '</div>';
+      tdQuota.innerHTML = quotaHtml;
+      tdQuota.title = t('token.tableBucketQuota');
+    } else if (consumedModeEnabled) {
+      tdQuota.className = 'text-center font-mono text-xs';
       tdQuota.innerText = item.consumed;
       tdQuota.title = t('token.tableQuotaConsumed');
     } else {
+      tdQuota.className = 'text-center font-mono text-xs';
       tdQuota.innerText = item.quota;
       tdQuota.title = t('token.tableQuota');
     }
-
-
 
     // Note (Left)
     const tdNote = document.createElement('td');

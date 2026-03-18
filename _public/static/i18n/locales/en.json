@@ -67,7 +67,8 @@
     "noTokenSelected": "No Token selected",
     "clearCache": "Clear cache",
     "failureDetails": "Failure Details",
-    "retryFailed": "Retry failed items"
+    "retryFailed": "Retry failed items",
+    "raw": "Raw"
   },
   "nav": {
     "tokenManage": "Token Mgmt",
@@ -248,7 +249,8 @@
       "keyword": "Keyword",
       "keywordPlaceholder": "traceID / path / error keyword",
       "apply": "Apply",
-      "reset": "Reset"
+      "reset": "Reset",
+      "excludeAdminRoutes": "Hide `/v1/admin/*` only on this page"
     },
     "levels": {
       "all": "All Levels"
@@ -259,9 +261,31 @@
       "entriesHint": "Shown with current filters",
       "errorWarn": "Warnings / Errors",
       "errorWarnHint": "warning + error",
-      "size": "File Size",
-      "sizeHint": "Disk usage"
-    }
+      "size": "Total Size",
+      "sizeHint": "Log directory usage"
+    },
+    "loadFilesFailed": "Failed to load log files",
+    "loadFailed": "Failed to load logs",
+    "noFiles": "No log files",
+    "fileCount": "{count} log files",
+    "deleteNone": "Select log files to delete first",
+    "deleteConfirm": "Delete {count} log files?",
+    "deleteFailed": "Failed to delete logs",
+    "deleteResult": "Deleted {deleted} log files, {failed} failed",
+    "toggle": {
+      "expand": "Expand",
+      "collapse": "Collapse"
+    },
+    "autoRefresh": {
+      "buttonAria": "Auto refresh",
+      "off": "Auto refresh: Off",
+      "offShort": "Off",
+      "interval": "Auto refresh: {seconds}s",
+      "intervalLabel": "{seconds}s",
+      "changed": "Auto refresh: {label}",
+      "disabled": "Auto refresh disabled"
+    },
+    "deleteSelected": "Delete Selected"
   },
   "token": {
     "pageTitle": "Grok2API - Token Mgmt",
@@ -277,6 +301,19 @@
     "statImageQuota": "Image Remaining",
     "statChatConsumed": "Chat Consumed",
     "statImageConsumed": "Image Consumed",
+    "statGrok3Quota": "Grok-3 Remaining",
+    "statGrok4Quota": "Grok-4 Remaining",
+    "statGrok41Probe": "Grok-4.1 Probe",
+    "statProbeHint": "Reference only",
+    "statProbeQueries": "{count} queries",
+    "statImageVideoHint": "= Grok-3 high bucket",
+    "statImageEdit": "Image Edit",
+    "statEditHint": "Independent upstream",
+    "statEditAvailable": "{count} available",
+    "statEditCooling": "Cooling",
+    "statStorage": "Storage Backend",
+    "statStorageUnavailable": "Loading...",
+    "statStorageExternal": "External storage",
     "statVideoQuota": "Video Remaining",
     "statVideoUnavailable": "N/A",
     "statTotalCalls": "Total Calls",
@@ -291,6 +328,7 @@
     "tableType": "Type",
     "tableStatus": "Status",
     "tableQuota": "Quota",
+    "tableBucketQuota": "Bucket Quota",
     "tableQuotaConsumed": "Consumed",
     "tableNote": "Note",
     "tableActions": "Actions",

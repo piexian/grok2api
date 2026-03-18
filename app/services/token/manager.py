@@ -169,9 +169,7 @@ class TokenManager:
         self._has_usage_changes = True
         self._usage_change_seq += 1
 
-    def _track_token_change(
-        self, token: TokenInfo, pool_name: str, change_kind: str
-    ):
+    def _track_token_change(self, token: TokenInfo, pool_name: str, change_kind: str):
         token_key = token.token
         if token_key.startswith("sso="):
             token_key = token_key[4:]
@@ -213,6 +211,149 @@ class TokenManager:
                     except (TypeError, ValueError):
                         return None
         return None
+
+    def _coerce_timestamp_ms(self, value: object) -> Optional[int]:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            if numeric <= 0:
+                return None
+            if numeric > 10**12:
+                return int(numeric)
+            if numeric > 10**9:
+                return int(numeric * 1000)
+            return None
+
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return self._coerce_timestamp_ms(float(text))
+            except ValueError:
+                pass
+            try:
+                normalized = text.replace("Z", "+00:00")
+                return int(datetime.fromisoformat(normalized).timestamp() * 1000)
+            except ValueError:
+                return None
+
+        return None
+
+    def _extract_model_cooldowns(self, raw_results: dict | None) -> Dict[str, int]:
+        if not isinstance(raw_results, dict):
+            return {}
+
+        now_ms = int(time.time() * 1000)
+        cooldowns: Dict[str, int] = {}
+        timestamp_keys = (
+            "resetAt",
+            "reset_at",
+            "resetsAt",
+            "resets_at",
+            "resetTime",
+            "reset_time",
+            "nextAvailableAt",
+            "next_available_at",
+        )
+
+        for model_name, payload in raw_results.items():
+            if not isinstance(payload, dict):
+                continue
+
+            remaining = payload.get("remainingQueries")
+            if remaining is None:
+                remaining = payload.get("remainingTokens")
+            try:
+                if remaining is not None and int(remaining) > 0:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            candidates = []
+            for key in timestamp_keys:
+                if key in payload:
+                    candidates.append(payload.get(key))
+            limits = payload.get("limits") or payload.get("rateLimits")
+            if isinstance(limits, dict):
+                for key in timestamp_keys:
+                    if key in limits:
+                        candidates.append(limits.get(key))
+
+            for candidate in candidates:
+                until_ms = self._coerce_timestamp_ms(candidate)
+                if until_ms and until_ms > now_ms:
+                    cooldowns[model_name] = until_ms
+                    break
+
+        return cooldowns
+
+    def _apply_synced_usage_result(
+        self,
+        token: TokenInfo,
+        pool_name: Optional[str],
+        result: dict,
+        *,
+        is_usage: bool,
+    ) -> tuple[Optional[str], int, int, TokenStatus] | None:
+        if not isinstance(result, dict):
+            return None
+
+        grok3_quota = result.get("grok3_quota")
+        grok4_quota = result.get("grok4_quota")
+        grok41_queries = result.get("grok41_queries")
+        grok420_queries = result.get("grok420_queries")
+        raw_data = result.get("raw") if isinstance(result.get("raw"), dict) else {}
+
+        token.grok3_quota = grok3_quota
+        token.grok4_quota = grok4_quota
+        token.grok41_queries = grok41_queries
+        token.grok420_queries = grok420_queries
+        token.model_cooldowns = self._extract_model_cooldowns(raw_data)
+
+        new_quota = result.get("remainingTokens")
+        if new_quota is None and grok3_quota is not None:
+            new_quota = grok3_quota.remaining_tokens
+        if new_quota is None:
+            return None
+
+        old_quota = token.quota
+        old_status = token.status
+
+        if self._is_consumed_mode():
+            token.update_quota_with_consumed(new_quota)
+        else:
+            token.update_quota(new_quota)
+        token.record_success(is_usage=is_usage)
+        token.mark_synced()
+
+        grok3_raw = raw_data.get("grok-3") or result
+        window_size = self._extract_window_size_seconds(grok3_raw)
+        if window_size is not None and pool_name:
+            if (
+                pool_name == SUPER_POOL_NAME
+                and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
+            ):
+                pool_name = self._move_token_pool(
+                    token,
+                    SUPER_POOL_NAME,
+                    BASIC_POOL_NAME,
+                    reason=f"windowSizeSeconds={window_size}",
+                )
+            elif (
+                pool_name == BASIC_POOL_NAME
+                and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
+            ):
+                pool_name = self._move_token_pool(
+                    token,
+                    BASIC_POOL_NAME,
+                    SUPER_POOL_NAME,
+                    reason=f"windowSizeSeconds={window_size}",
+                )
+
+        return pool_name, old_quota, int(new_quota), old_status
 
     def _move_token_pool(
         self,
@@ -296,7 +437,7 @@ class TokenManager:
             except Exception as e:
                 logger.error(f"Failed to save tokens: {e}")
                 self._dirty = True
-                if 'dirty_tokens' in locals():
+                if "dirty_tokens" in locals():
                     for token_key, meta in dirty_tokens.items():
                         existing = self._dirty_tokens.get(token_key)
                         if existing and existing[1] == "state":
@@ -341,7 +482,12 @@ class TokenManager:
             if self._dirty:
                 self._schedule_save()
 
-    def get_token(self, pool_name: str = "ssoBasic", exclude: set = None, prefer_tags: Optional[Set[str]] = None) -> Optional[str]:
+    def get_token(
+        self,
+        pool_name: str = "ssoBasic",
+        exclude: set = None,
+        prefer_tags: Optional[Set[str]] = None,
+    ) -> Optional[str]:
         """
         获取可用 Token
 
@@ -367,7 +513,9 @@ class TokenManager:
             return token[4:]
         return token
 
-    def get_token_info(self, pool_name: str = "ssoBasic", prefer_tags: Optional[Set[str]] = None) -> Optional["TokenInfo"]:
+    def get_token_info(
+        self, pool_name: str = "ssoBasic", prefer_tags: Optional[Set[str]] = None
+    ) -> Optional["TokenInfo"]:
         """
         获取可用 Token 的完整信息
 
@@ -505,7 +653,7 @@ class TokenManager:
         is_usage: bool = True,
     ) -> bool:
         """
-        同步 Token 用量
+        同步 Token 用量（多桶）
 
         优先从 API 获取最新配额，失败则降级到本地预估
 
@@ -536,55 +684,26 @@ class TokenManager:
         # 尝试 API 同步
         try:
             usage_service = UsageService()
-            result = await usage_service.get(token_str)
-
-            if result and "remainingTokens" in result:
-                new_quota = result.get("remainingTokens")
-                if new_quota is None:
-                    new_quota = result.get("remainingQueries")
-                if new_quota is None:
-                    return False
-                old_quota = target_token.quota
-                old_status = target_token.status
-
-                if self._is_consumed_mode():
-                    target_token.update_quota_with_consumed(new_quota)
-                else:
-                    target_token.update_quota(new_quota)
-                target_token.record_success(is_usage=is_usage)
-                target_token.mark_synced()
-
-                window_size = self._extract_window_size_seconds(result)
-                if window_size is not None:
-                    if (
-                        target_pool_name == SUPER_POOL_NAME
-                        and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            SUPER_POOL_NAME,
-                            BASIC_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
-                    elif (
-                        target_pool_name == BASIC_POOL_NAME
-                        and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
-                    ):
-                        target_pool_name = self._move_token_pool(
-                            target_token,
-                            BASIC_POOL_NAME,
-                            SUPER_POOL_NAME,
-                            reason=f"windowSizeSeconds={window_size}",
-                        )
-
+            result = await usage_service.get_multi(token_str)
+            applied = self._apply_synced_usage_result(
+                target_token,
+                target_pool_name,
+                result,
+                is_usage=is_usage,
+            )
+            if applied is not None:
+                target_pool_name, old_quota, new_quota, old_status = applied
                 consumed = max(0, old_quota - new_quota)
                 logger.debug(
                     f"Token {raw_token[:10]}...: synced quota "
-                    f"{old_quota} -> {new_quota} (consumed: {consumed}, use_count: {target_token.use_count})"
+                    f"{old_quota} -> {new_quota} (consumed: {consumed}, "
+                    f"use_count: {target_token.use_count})"
                 )
 
                 if target_pool_name:
-                    change_kind = "state" if target_token.status != old_status else "usage"
+                    change_kind = (
+                        "state" if target_token.status != old_status else "usage"
+                    )
                     self._track_token_change(
                         target_token, target_pool_name, change_kind
                     )
@@ -593,26 +712,39 @@ class TokenManager:
 
         except Exception as e:
             if isinstance(e, UpstreamException):
-                status = e.details.get("status") if e.details else getattr(e, "status_code", None)
-                is_token_expired = e.details.get("is_token_expired", False) if e.details else False
-                
+                status = (
+                    e.details.get("status")
+                    if e.details
+                    else getattr(e, "status_code", None)
+                )
+                is_token_expired = (
+                    e.details.get("is_token_expired", False) if e.details else False
+                )
+
                 if status == 401:
                     # 只要是 401，都应该记录一次失败，增加 fail_count
-                    reason = "rate_limits_auth_failed" if is_token_expired else "rate_limits_auth_unknown"
-                    
+                    reason = (
+                        "rate_limits_auth_failed"
+                        if is_token_expired
+                        else "rate_limits_auth_unknown"
+                    )
+
                     # 如果确认为过期，传入 threshold=1 强制立即失效
-                    await self.record_fail(token_str, status, reason, threshold=1 if is_token_expired else None)
-                    
+                    await self.record_fail(
+                        token_str,
+                        status,
+                        reason,
+                        threshold=1 if is_token_expired else None,
+                    )
+
                     if is_token_expired:
                         # 只有确认过期的才跳过 fallback
                         logger.warning(
                             f"Token {raw_token[:10]}...: API sync failed (Confirmed Token Expired), skipping fallback"
                         )
                         return False
-                
-            logger.warning(
-                f"Token {raw_token[:10]}...: API sync failed, error: {e}"
-            )
+
+            logger.warning(f"Token {raw_token[:10]}...: API sync failed, error: {e}")
             # 如果不执行降级扣费（例如在刷新状态时），则直接返回 False 表示同步失败
             if not consume_on_fail:
                 return False
@@ -628,7 +760,11 @@ class TokenManager:
             return False
 
     async def record_fail(
-        self, token_str: str, status_code: int = 401, reason: str = "", threshold: Optional[int] = None
+        self,
+        token_str: str,
+        status_code: int = 401,
+        reason: str = "",
+        threshold: Optional[int] = None,
     ) -> bool:
         """
         记录 Token 失败
@@ -654,13 +790,17 @@ class TokenManager:
                             threshold = int(threshold)
                         except (TypeError, ValueError):
                             threshold = FAIL_THRESHOLD
-                    
+
                     if threshold < 1:
                         threshold = 1
 
                     token.record_fail(status_code, reason, threshold=threshold)
-                    
-                    log_level = logger.warning if token.status == TokenStatus.EXPIRED else logger.info
+
+                    log_level = (
+                        logger.warning
+                        if token.status == TokenStatus.EXPIRED
+                        else logger.info
+                    )
                     log_level(
                         f"Token {raw_token[:10]}...: recorded {status_code} failure "
                         f"({token.fail_count}/{threshold}) - {reason} - status: {token.status}"
@@ -946,13 +1086,15 @@ class TokenManager:
                 return getattr(error, "status_code", None)
             return None
 
-        async def _get_usage_with_retry(token_str: str) -> tuple[Optional[dict], Optional[int], Optional[Exception]]:
+        async def _get_usage_with_retry(
+            token_str: str,
+        ) -> tuple[Optional[dict], Optional[int], Optional[Exception]]:
             ctx = RetryContext()
             # Match previous behavior: 3 attempts total (initial + 2 retries).
             ctx.max_retry = min(ctx.max_retry, 2)
             while True:
                 try:
-                    return await usage_service.get(token_str), None, None
+                    return await usage_service.get_multi(token_str), None, None
                 except Exception as e:
                     status = _extract_status(e)
                     if status is None:
@@ -977,7 +1119,7 @@ class TokenManager:
 
         async def _refresh_one(item: tuple[str, TokenInfo]) -> dict:
             """刷新单个 token"""
-            _, token_info = item
+            pool_name, token_info = item
             async with semaphore:
                 token_str = token_info.token
                 if token_str.startswith("sso="):
@@ -985,54 +1127,27 @@ class TokenManager:
 
                 result, status, error = await _get_usage_with_retry(token_str)
 
-                if result and "remainingTokens" in result:
-                    new_quota = result.get("remainingTokens")
-                    if new_quota is None:
-                        new_quota = result.get("remainingQueries")
-                    if new_quota is None:
-                        return {"recovered": False, "expired": False}
-                    old_quota = token_info.quota
-                    old_status = token_info.status
-
-                    if self._is_consumed_mode():
-                        token_info.update_quota_with_consumed(new_quota)
-                    else:
-                        token_info.update_quota(new_quota)
-                    token_info.mark_synced()
-
-                    window_size = self._extract_window_size_seconds(result)
-                    if window_size is not None:
-                        current_pool = self.get_pool_name_for_token(token_info.token)
-                        if (
-                            current_pool == SUPER_POOL_NAME
-                            and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
-                        ):
-                            self._move_token_pool(
-                                token_info,
-                                SUPER_POOL_NAME,
-                                BASIC_POOL_NAME,
-                                reason=f"windowSizeSeconds={window_size}",
-                            )
-                        elif (
-                            current_pool == BASIC_POOL_NAME
-                            and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
-                        ):
-                            self._move_token_pool(
-                                token_info,
-                                BASIC_POOL_NAME,
-                                SUPER_POOL_NAME,
-                                reason=f"windowSizeSeconds={window_size}",
-                            )
-
-                    logger.debug(
-                        f"Token {token_info.token[:10]}...: refreshed "
-                        f"{old_quota} -> {new_quota}, status: {old_status} -> {token_info.status}"
+                if result:
+                    current_pool = (
+                        self.get_pool_name_for_token(token_info.token) or pool_name
                     )
-
-                    return {
-                        "recovered": new_quota > 0 and old_quota == 0,
-                        "expired": False,
-                    }
+                    applied = self._apply_synced_usage_result(
+                        token_info,
+                        current_pool,
+                        result,
+                        is_usage=False,
+                    )
+                    if applied is not None:
+                        _, old_quota, new_quota, old_status = applied
+                        logger.debug(
+                            f"Token {token_info.token[:10]}...: refreshed "
+                            f"{old_quota} -> {new_quota}, status: "
+                            f"{old_status} -> {token_info.status}"
+                        )
+                        return {
+                            "recovered": new_quota > 0 and old_quota == 0,
+                            "expired": False,
+                        }
 
                 if status == 401:
                     is_token_expired = (
@@ -1118,7 +1233,9 @@ class TokenManager:
             max_tokens = DEFAULT_ON_DEMAND_REFRESH_MAX_TOKENS
 
         if self._on_demand_refresh_lock.locked():
-            logger.debug("On-demand refresh skipped: another refresh is already running")
+            logger.debug(
+                "On-demand refresh skipped: another refresh is already running"
+            )
             return {"checked": 0, "refreshed": 0, "recovered": 0, "expired": 0}
 
         now = time.monotonic()

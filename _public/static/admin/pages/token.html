@@ -70,22 +70,47 @@
           <div class="stat-label" data-i18n="token.statInvalid">Token 失效</div>
         </div>
 
-        <!-- Row 2 -->
+        <!-- Row 2: Chat buckets -->
         <div class="stat-card">
-          <div class="stat-value" id="stat-chat-quota">-</div>
-          <div class="stat-label" data-i18n="token.statChatQuota">Chat 剩余</div>
+          <div class="stat-value" id="stat-grok3-quota">-</div>
+          <div class="stat-label" data-i18n="token.statGrok3Quota">Grok-3 剩余</div>
+          <div class="quota-bar" id="stat-grok3-bar"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-value text-blue-600" id="stat-image-quota">-</div>
-          <div class="stat-label" data-i18n="token.statImageQuota">Image 剩余</div>
+          <div class="stat-value text-blue-600" id="stat-grok4-quota">-</div>
+          <div class="stat-label" data-i18n="token.statGrok4Quota">Grok-4 剩余</div>
+          <div class="quota-bar" id="stat-grok4-bar"></div>
         </div>
         <div class="stat-card">
-          <div class="stat-value text-gray-400" id="stat-video-quota" data-i18n="token.statVideoUnavailable">无法统计</div>
-          <div class="stat-label" data-i18n="token.statVideoQuota">Video 剩余</div>
+          <div class="stat-value text-amber-500" id="stat-grok41-quota">-</div>
+          <div class="stat-label" data-i18n="token.statGrok41Probe">Grok-4.1 探针</div>
+          <div class="stat-hint" data-i18n="token.statProbeHint">仅参考</div>
         </div>
         <div class="stat-card">
           <div class="stat-value" id="stat-total-calls">-</div>
           <div class="stat-label" data-i18n="token.statTotalCalls">总调用次数</div>
+        </div>
+
+        <!-- Row 3: Image / Video / Edit / Storage -->
+        <div class="stat-card">
+          <div class="stat-value text-purple-600" id="stat-image-quota">-</div>
+          <div class="stat-label" data-i18n="token.statImageQuota">Image 剩余</div>
+          <div class="stat-hint" data-i18n="token.statImageVideoHint">= Grok-3 high 桶</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value text-indigo-600" id="stat-video-quota">-</div>
+          <div class="stat-label" data-i18n="token.statVideoQuota">Video 剩余</div>
+          <div class="stat-hint" data-i18n="token.statImageVideoHint">= Grok-3 high 桶</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value text-orange-500" id="stat-edit-quota">-</div>
+          <div class="stat-label" data-i18n="token.statImageEdit">Image Edit</div>
+          <div class="stat-hint" data-i18n="token.statEditHint">独立上游</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="stat-storage">-</div>
+          <div class="stat-label" data-i18n="token.statStorage">存储后端</div>
+          <div class="stat-hint" id="stat-storage-hint" data-i18n="token.statStorageUnavailable">加载中...</div>
         </div>
       </div>
 

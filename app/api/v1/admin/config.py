@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.auth import verify_app_key
 from app.core.config import config
 from app.core.logger import reload_logging_from_config
-from app.core.storage import get_storage as resolve_storage, LocalStorage, RedisStorage, SQLStorage
+from app.core.storage import get_storage_runtime_info
 from app.core.logger import logger
 
 router = APIRouter()
@@ -112,19 +112,4 @@ async def update_config(data: dict):
 @router.get("/storage", dependencies=[Depends(verify_app_key)])
 async def get_storage_mode():
     """获取当前存储模式"""
-    storage_type = os.getenv("SERVER_STORAGE_TYPE", "").lower()
-    if not storage_type:
-        storage = resolve_storage()
-        if isinstance(storage, LocalStorage):
-            storage_type = "local"
-        elif isinstance(storage, RedisStorage):
-            storage_type = "redis"
-        elif isinstance(storage, SQLStorage):
-            storage_type = {
-                "mysql": "mysql",
-                "mariadb": "mysql",
-                "postgres": "pgsql",
-                "postgresql": "pgsql",
-                "pgsql": "pgsql",
-            }.get(storage.dialect, storage.dialect)
-    return {"type": storage_type or "local"}
+    return get_storage_runtime_info()

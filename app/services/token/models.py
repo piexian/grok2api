@@ -9,7 +9,7 @@ Token 数据模型
 """
 
 from enum import Enum
-from typing import Optional, List
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
@@ -44,6 +44,17 @@ EFFORT_COST = {
 }
 
 
+class BucketQuota(BaseModel):
+    """单桶额度（grok-3 / grok-4）"""
+
+    remaining_tokens: int = 0
+    total_tokens: int = 0
+    low_remaining: int = 0
+    low_total: int = 0
+    high_remaining: int = 0
+    high_total: int = 0
+
+
 class TokenInfo(BaseModel):
     """Token 信息"""
 
@@ -54,6 +65,15 @@ class TokenInfo(BaseModel):
     # 消耗记录（本地累加，不依赖 API 返回值）
     # 仅在 consumed_mode_enabled=true 时使用
     consumed: int = 0
+
+    # 分桶额度（来自 /rest/rate-limits 同步）
+    grok3_quota: Optional[BucketQuota] = None
+    grok4_quota: Optional[BucketQuota] = None
+    grok41_queries: Optional[int] = None  # 探针桶，仅参考
+    grok420_queries: Optional[int] = None  # 探针桶，仅参考
+
+    # 模型级冷却
+    model_cooldowns: Dict[str, int] = Field(default_factory=dict)
 
     # 统计
     created_at: int = Field(
@@ -301,6 +321,7 @@ __all__ = [
     "TokenStatus",
     "TokenInfo",
     "TokenPoolStats",
+    "BucketQuota",
     "EffortType",
     "EFFORT_COST",
     "BASIC__DEFAULT_QUOTA",

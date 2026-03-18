@@ -134,9 +134,7 @@ class BaseStorage(abc.ABC):
                 continue
             pool_list = existing.setdefault(pool_name, [])
             normalized = {
-                k: v
-                for k, v in item.items()
-                if k not in ("pool_name", "_update_kind")
+                k: v for k, v in item.items() if k not in ("pool_name", "_update_kind")
             }
             replaced = False
             for idx, current in enumerate(pool_list):
@@ -764,7 +762,9 @@ class SQLStorage(BaseStorage):
             return tags
         return []
 
-    def _token_to_row(self, token_data: Dict[str, Any], pool_name: str) -> Dict[str, Any]:
+    def _token_to_row(
+        self, token_data: Dict[str, Any], pool_name: str
+    ) -> Dict[str, Any]:
         token_str = token_data.get("token")
         if isinstance(token_str, str) and token_str.startswith("sso="):
             token_str = token_str[4:]
@@ -1059,9 +1059,7 @@ class SQLStorage(BaseStorage):
                         if note is not None:
                             token_data["note"] = note
                         if last_asset_clear_at is not None:
-                            token_data["last_asset_clear_at"] = int(
-                                last_asset_clear_at
-                            )
+                            token_data["last_asset_clear_at"] = int(last_asset_clear_at)
 
                         legacy_data = None
                         if data_json:
@@ -1200,7 +1198,7 @@ class SQLStorage(BaseStorage):
                             "data_hash=VALUES(data_hash), "
                             "updated_at=VALUES(updated_at)"
                         )
-                    elif self.dialect in ("postgres", "postgresql", "pgsql"):
+                    elif self.dialect in ("postgres", "postgresql", "pgsql", "sqlite"):
                         upsert_stmt = text(
                             "INSERT INTO tokens (token, pool_name, status, quota, created_at, "
                             "last_used_at, use_count, fail_count, last_fail_at, "
@@ -1264,7 +1262,7 @@ class SQLStorage(BaseStorage):
                             "last_sync_at=VALUES(last_sync_at), "
                             "updated_at=VALUES(updated_at)"
                         )
-                    elif self.dialect in ("postgres", "postgresql", "pgsql"):
+                    elif self.dialect in ("postgres", "postgresql", "pgsql", "sqlite"):
                         usage_stmt = text(
                             "INSERT INTO tokens (token, pool_name, status, quota, created_at, "
                             "last_used_at, use_count, fail_count, last_fail_at, "
@@ -1284,6 +1282,8 @@ class SQLStorage(BaseStorage):
                             "last_fail_at=EXCLUDED.last_fail_at, "
                             "last_fail_reason=EXCLUDED.last_fail_reason, "
                             "last_sync_at=EXCLUDED.last_sync_at, "
+                            "data=EXCLUDED.data, "
+                            "data_hash=EXCLUDED.data_hash, "
                             "updated_at=EXCLUDED.updated_at"
                         )
                     else:
@@ -1531,9 +1531,10 @@ class StorageFactory:
             storage_url: 可选的自定义路径或文件名
                         支持格式：
                         - 空: 使用默认 data/grok2api.db
-                        - 文件名: data/{filename}
-                        - 相对/绝对路径: 直接使用
-                        - DSN 格式: sqlite:///path/to/db 或 sqlite:///:memory:
+                        - 文件名: 写入 DATA_DIR/{filename}
+                        - 相对路径: 写入 DATA_DIR/{relative_path}
+                        - 绝对路径: 直接使用
+                        - DSN 格式: sqlite:///absolute/path.db 或 sqlite:///:memory:
 
         Returns:
             绝对路径的数据库文件路径（或 ":memory:"）
@@ -1566,6 +1567,48 @@ class StorageFactory:
             logger.info(f"创建 SQLite 数据库文件: {db_path}")
 
         return str(db_path)
+
+
+def get_storage_runtime_info() -> Dict[str, Any]:
+    """获取当前存储后端的运行时信息。"""
+    storage = get_storage()
+    storage_type = os.getenv("SERVER_STORAGE_TYPE", "").lower()
+    info: Dict[str, Any] = {}
+
+    if not storage_type:
+        if isinstance(storage, LocalStorage):
+            storage_type = "local"
+        elif isinstance(storage, RedisStorage):
+            storage_type = "redis"
+        elif isinstance(storage, SQLStorage):
+            storage_type = {
+                "mysql": "mysql",
+                "mariadb": "mysql",
+                "postgres": "pgsql",
+                "postgresql": "pgsql",
+                "pgsql": "pgsql",
+                "sqlite": "sqlite",
+            }.get(storage.dialect, storage.dialect)
+
+    info["type"] = storage_type or "local"
+
+    if info["type"] == "local":
+        info["path"] = str(DATA_DIR)
+    elif info["type"] == "sqlite":
+        sqlite_path = None
+        if isinstance(storage, SQLStorage) and storage.dialect == "sqlite":
+            try:
+                sqlite_path = storage.engine.url.database
+            except Exception:
+                sqlite_path = None
+        if not sqlite_path:
+            sqlite_path = StorageFactory._prepare_sqlite_path(
+                os.getenv("SERVER_STORAGE_URL", "")
+            )
+        info["path"] = sqlite_path
+        info["memory"] = sqlite_path == ":memory:"
+
+    return info
 
 
 def get_storage() -> BaseStorage:

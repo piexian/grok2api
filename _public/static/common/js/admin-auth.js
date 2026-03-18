@@ -245,7 +245,8 @@ function formatStorageLabel(type) {
     pgsql: 'pgsql',
     postgres: 'pgsql',
     postgresql: 'pgsql',
-    redis: 'redis'
+    redis: 'redis',
+    sqlite: 'sqlite'
   };
   return map[normalized] || '-';
 }

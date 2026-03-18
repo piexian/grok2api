@@ -50,7 +50,7 @@ docker compose up -d
 
 > Set `DATA_DIR=/tmp/data` and disable file logs with `LOG_FILE_ENABLED=false`.
 >
-> For persistence, use MySQL / Redis / PostgreSQL and set `SERVER_STORAGE_TYPE` and `SERVER_STORAGE_URL`.
+> Vercel cannot persist local files. For persistence, use MySQL / Redis / PostgreSQL and set `SERVER_STORAGE_TYPE` and `SERVER_STORAGE_URL`. Do not rely on `local` / `sqlite` for persistence on Vercel.
 
 ### Render
 
@@ -58,7 +58,7 @@ docker compose up -d
 
 > Render free instances sleep after 15 minutes of inactivity; redeploy/restart will lose data.
 >
-> For persistence, use MySQL / Redis / PostgreSQL and set `SERVER_STORAGE_TYPE` and `SERVER_STORAGE_URL`.
+> If you mount a persistent disk, you can use `local` / `sqlite`. Without a persistent disk, use MySQL / Redis / PostgreSQL and set `SERVER_STORAGE_TYPE` and `SERVER_STORAGE_URL`.
 
 <br>
 
@@ -91,10 +91,20 @@ docker compose up -d
 | `SERVER_PORT` | Server port | `8000` | `8000` |
 | `HOST_PORT` | Host published port for Docker Compose | `8000` | `9000` |
 | `SERVER_WORKERS` | Server worker count | `1` | `2` |
-| `SERVER_STORAGE_TYPE` | Storage type (`local`/`redis`/`mysql`/`pgsql`) | `local` | `pgsql` |
-| `SERVER_STORAGE_URL` | Storage DSN (optional for local) | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
+| `SERVER_STORAGE_TYPE` | Storage type (`local`/`redis`/`mysql`/`pgsql`/`sqlite`) | `local` | `pgsql` |
+| `SERVER_STORAGE_URL` | Storage DSN/path (optional for `local`, optional or path-based for `sqlite`) | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
 
 > MySQL example: `mysql+aiomysql://user:password@host:3306/db` (if you provide `mysql://`, it will be converted to `mysql+aiomysql://`).
+>
+> SQLite examples:
+> - `sqlite:///data/grok2api.db` - use absolute path `/data/grok2api.db`
+> - `/data/grok2api.db` - use absolute path `/data/grok2api.db`
+> - `grok2api.db` - file name only, stored as `DATA_DIR/grok2api.db`
+> - `subdir/grok2api.db` - relative path, stored as `DATA_DIR/subdir/grok2api.db`
+> - `sqlite:///:memory:` - in-memory database, not persistent
+> - empty - use default `DATA_DIR/grok2api.db`
+>
+> SQLite is suitable for local runs or single-instance deployments with a persistent volume. If the filesystem is ephemeral, the database will be lost after restart.
 
 <br>
 

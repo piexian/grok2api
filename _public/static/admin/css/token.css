@@ -524,3 +524,76 @@
         max-height: 72px;
       }
     }
+
+    /* Multi-bucket quota */
+    .quota-multi {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 140px;
+    }
+
+    .quota-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .quota-label {
+      width: 20px;
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accents-5);
+    }
+
+    .quota-bar-mini {
+      flex: 1;
+      min-width: 60px;
+      height: 6px;
+      overflow: hidden;
+      background: #f3f4f6;
+      border-radius: 3px;
+    }
+
+    .quota-fill {
+      height: 100%;
+      background: #10b981;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .quota-fill-blue {
+      background: #3b82f6;
+    }
+
+    .quota-num {
+      min-width: 50px;
+      text-align: right;
+      font-size: 10px;
+      font-family: 'Geist Mono', monospace;
+      color: var(--accents-5);
+    }
+
+    .stat-card .quota-bar {
+      margin-top: 6px;
+      height: 4px;
+      overflow: hidden;
+      background: #f3f4f6;
+      border-radius: 2px;
+    }
+
+    .stat-card .quota-bar .fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+
+    .stat-hint {
+      margin-top: 4px;
+      font-size: 10px;
+      line-height: 1.35;
+      color: var(--accents-4);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }

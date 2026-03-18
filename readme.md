@@ -50,7 +50,7 @@ docker compose up -d
 
 > 请务必设置 `DATA_DIR=/tmp/data` 并关闭文件日志 `LOG_FILE_ENABLED=false`。
 >
-> 持久化请使用 MySQL / Redis / PostgreSQL，并设置：`SERVER_STORAGE_TYPE` 与 `SERVER_STORAGE_URL`。
+> Vercel 无法持久化本地文件，持久化请使用 MySQL / Redis / PostgreSQL，并设置：`SERVER_STORAGE_TYPE` 与 `SERVER_STORAGE_URL`。不要在 Vercel 上使用 `local` / `sqlite` 作为持久化存储。
 
 ### Render 部署
 
@@ -58,7 +58,7 @@ docker compose up -d
 
 > Render 免费实例 15 分钟无访问会休眠；重启/重新部署会丢失数据。
 >
-> 持久化请使用 MySQL / Redis / PostgreSQL，并设置：`SERVER_STORAGE_TYPE` 与 `SERVER_STORAGE_URL`。
+> 若已挂载持久磁盘，可使用 `local` / `sqlite`；若没有持久磁盘，请使用 MySQL / Redis / PostgreSQL，并设置：`SERVER_STORAGE_TYPE` 与 `SERVER_STORAGE_URL`。
 
 <br>
 
@@ -92,14 +92,19 @@ docker compose up -d
 | `HOST_PORT` | Docker Compose 宿主机映射端口 | `8000` | `9000` |
 | `SERVER_WORKERS` | 服务进程数量 | `1` | `2` |
 | `SERVER_STORAGE_TYPE` | 存储类型（`local`/`redis`/`mysql`/`pgsql`/`sqlite`） | `local` | `pgsql` |
-| `SERVER_STORAGE_URL` | 存储连接串（local 时可为空） | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
+| `SERVER_STORAGE_URL` | 存储连接串/路径（`local` 可为空，`sqlite` 可为空或填路径） | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
 
 > MySQL 示例：`mysql+aiomysql://user:password@host:3306/db`（若填 `mysql://` 会自动转为 `mysql+aiomysql://`）
 >
 > SQLite 示例：
-> - `sqlite:///data/grok2api.db` - 指定路径
-> - `grok2api.db` - 仅文件名，自动存入 `DATA_DIR`
+> - `sqlite:///data/grok2api.db` - 使用绝对路径 `/data/grok2api.db`
+> - `/data/grok2api.db` - 使用绝对路径 `/data/grok2api.db`
+> - `grok2api.db` - 仅文件名，自动写入 `DATA_DIR/grok2api.db`
+> - `subdir/grok2api.db` - 相对路径，自动写入 `DATA_DIR/subdir/grok2api.db`
+> - `sqlite:///:memory:` - 使用内存数据库，不持久化
 > - 留空 - 使用默认 `DATA_DIR/grok2api.db`
+>
+> SQLite 适合本地运行或单实例 + 持久卷场景；如果实例文件系统是临时的，重启后数据库会丢失。
 
 <br>
 
