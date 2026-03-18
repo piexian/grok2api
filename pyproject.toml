@@ -10,6 +10,7 @@ dependencies = [
     "aiohttp-socks>=0.11.0",
     "aiomysql>=0.2.0",
     "asyncpg>=0.31.0",
+    "aiosqlite>=0.20.0",
     "cryptography>=46.0.5",
     "curl-cffi>=0.13.0",
     "fastapi>=0.119.0",
