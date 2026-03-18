@@ -91,10 +91,15 @@ docker compose up -d
 | `SERVER_PORT` | 服务端口 | `8000` | `8000` |
 | `HOST_PORT` | Docker Compose 宿主机映射端口 | `8000` | `9000` |
 | `SERVER_WORKERS` | 服务进程数量 | `1` | `2` |
-| `SERVER_STORAGE_TYPE` | 存储类型（`local`/`redis`/`mysql`/`pgsql`） | `local` | `pgsql` |
+| `SERVER_STORAGE_TYPE` | 存储类型（`local`/`redis`/`mysql`/`pgsql`/`sqlite`） | `local` | `pgsql` |
 | `SERVER_STORAGE_URL` | 存储连接串（local 时可为空） | `""` | `postgresql+asyncpg://user:password@host:5432/db` |
 
 > MySQL 示例：`mysql+aiomysql://user:password@host:3306/db`（若填 `mysql://` 会自动转为 `mysql+aiomysql://`）
+>
+> SQLite 示例：
+> - `sqlite:///data/grok2api.db` - 指定路径
+> - `grok2api.db` - 仅文件名，自动存入 `DATA_DIR`
+> - 留空 - 使用默认 `DATA_DIR/grok2api.db`
 
 <br>
 
