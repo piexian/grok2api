@@ -141,6 +141,9 @@ class RateLimitsReverse:
                         details={
                             "status": response.status_code,
                             "body": resp_text,
+                            "headers": dict(response.headers or {}),
+                            "retry_after": response.headers.get("Retry-After")
+                            or response.headers.get("retry-after"),
                             "is_token_expired": is_token_expired,
                             "is_cloudflare": is_cloudflare,
                         },

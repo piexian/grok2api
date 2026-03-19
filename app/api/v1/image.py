@@ -230,7 +230,7 @@ async def _get_token(model: str):
 
     token = None
     for pool_name in ModelService.pool_candidates_for_model(model):
-        token = token_mgr.get_token(pool_name)
+        token = token_mgr.get_token(pool_name, model_id=model)
         if token:
             break
 

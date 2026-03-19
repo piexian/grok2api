@@ -9,7 +9,11 @@ from curl_cffi.requests import AsyncSession
 
 from app.core.logger import logger
 from app.core.config import get_config
-from app.core.proxy_pool import get_current_proxy_from, rotate_proxy, should_rotate_proxy
+from app.core.proxy_pool import (
+    get_current_proxy_from,
+    rotate_proxy,
+    should_rotate_proxy,
+)
 from app.core.exceptions import UpstreamException
 from app.services.token.service import TokenService
 from app.services.reverse.utils.headers import build_headers
@@ -32,7 +36,9 @@ def _normalize_chat_proxy(proxy_url: str) -> str:
     return proxy_url
 
 
-def _log_proxy_state_once(base_proxy: str, normalized_proxy: str = "", scheme: str = ""):
+def _log_proxy_state_once(
+    base_proxy: str, normalized_proxy: str = "", scheme: str = ""
+):
     """仅在代理状态变化时记录一次代理配置日志。"""
     global _LAST_PROXY_LOG_STATE
 
@@ -124,7 +130,10 @@ class AppChatReverse:
             payload["responseMetadata"]["modelConfigOverride"] = model_config_override
 
         import json
-        logger.debug(f"AppChatReverse payload: {json.dumps(payload, indent=4, ensure_ascii=False)}")
+
+        logger.debug(
+            f"AppChatReverse payload: {json.dumps(payload, indent=4, ensure_ascii=False)}"
+        )
 
         return payload
 
@@ -140,7 +149,7 @@ class AppChatReverse:
         model_config_override: Dict[str, Any] = None,
     ) -> Any:
         """Send app chat request to Grok.
-        
+
         Args:
             session: AsyncSession, the session to use for the request.
             token: str, the SSO token.
@@ -155,21 +164,6 @@ class AppChatReverse:
             Any: The response from the request.
         """
         try:
-            # Get proxies
-            base_proxy = get_config("proxy.base_proxy_url")
-            proxy = None
-            proxies = None
-            if base_proxy:
-                normalized_proxy = _normalize_chat_proxy(base_proxy)
-                scheme = urlparse(normalized_proxy).scheme.lower()
-                if scheme.startswith("socks"):
-                    # curl_cffi 对 SOCKS 代理优先使用 proxy 参数，避免被按 HTTP CONNECT 处理
-                    proxy = normalized_proxy
-                else:
-                    proxies = {"http": normalized_proxy, "https": normalized_proxy}
-                _log_proxy_state_once(base_proxy, normalized_proxy, scheme)
-            else:
-                _log_proxy_state_once("")
             # Build headers
             headers = build_headers(
                 cookie_token=token,
@@ -211,7 +205,9 @@ class AppChatReverse:
 
             async def _do_request():
                 nonlocal active_proxy_key
-                active_proxy_key, base_proxy = get_current_proxy_from("proxy.base_proxy_url")
+                active_proxy_key, base_proxy = get_current_proxy_from(
+                    "proxy.base_proxy_url"
+                )
                 proxy = None
                 proxies = None
                 if base_proxy:
@@ -241,7 +237,6 @@ class AppChatReverse:
                 )
 
                 if response.status_code != 200:
-
                     # Get response content
                     content = ""
                     try:
@@ -259,7 +254,13 @@ class AppChatReverse:
                     )
                     raise UpstreamException(
                         message=f"AppChatReverse: Chat failed, {response.status_code}",
-                        details={"status": response.status_code, "body": content},
+                        details={
+                            "status": response.status_code,
+                            "body": content,
+                            "headers": dict(response.headers or {}),
+                            "retry_after": response.headers.get("Retry-After")
+                            or response.headers.get("retry-after"),
+                        },
                     )
 
                 return response
@@ -270,7 +271,9 @@ class AppChatReverse:
                     return None
                 return status
 
-            async def _on_retry(attempt: int, status_code: int, error: Exception, delay: float):
+            async def _on_retry(
+                attempt: int, status_code: int, error: Exception, delay: float
+            ):
                 if active_proxy_key and should_rotate_proxy(status_code):
                     rotate_proxy(active_proxy_key)
 

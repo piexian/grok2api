@@ -19,6 +19,7 @@ from app.core.config import get_config
 from app.core.exceptions import UpstreamException
 from app.services.token.pool import TokenPool
 from app.services.grok.batch_services.usage import UsageService
+from app.services.grok.services.model import ModelService
 from app.services.reverse.utils.retry import RetryContext, extract_retry_after
 
 
@@ -31,6 +32,7 @@ DEFAULT_SAVE_DELAY_MS = 500
 DEFAULT_USAGE_FLUSH_INTERVAL_SEC = 5
 DEFAULT_ON_DEMAND_REFRESH_MIN_INTERVAL_SEC = 300
 DEFAULT_ON_DEMAND_REFRESH_MAX_TOKENS = 100
+DEFAULT_MODEL_RATE_LIMIT_COOLDOWN_SEC = 300
 SUPER_WINDOW_THRESHOLD_SECONDS = 14400
 
 SUPER_POOL_NAME = "ssoSuper"
@@ -290,6 +292,75 @@ class TokenManager:
 
         return cooldowns
 
+    def _normalize_model_id(self, model_id: Optional[str]) -> Optional[str]:
+        if not model_id:
+            return None
+        model = ModelService.get(model_id)
+        if model:
+            return model.grok_model
+        return model_id
+
+    def _coerce_non_negative_int(self, value: object) -> Optional[int]:
+        try:
+            if value is None:
+                return None
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
+
+    def _compute_effective_quota(
+        self,
+        grok3_quota,
+        grok4_quota,
+        fallback: object = None,
+    ) -> Optional[int]:
+        candidates: list[int] = []
+        if grok3_quota is not None:
+            remaining = self._coerce_non_negative_int(grok3_quota.remaining_tokens)
+            if remaining is not None:
+                candidates.append(remaining)
+        if grok4_quota is not None:
+            remaining = self._coerce_non_negative_int(grok4_quota.remaining_tokens)
+            if remaining is not None:
+                candidates.append(remaining)
+        if candidates:
+            return max(candidates)
+        return self._coerce_non_negative_int(fallback)
+
+    def _recompute_effective_quota_for_token(self, token: TokenInfo) -> Optional[int]:
+        return self._compute_effective_quota(
+            token.grok3_quota,
+            token.grok4_quota,
+            fallback=token.quota,
+        )
+
+    def _apply_model_rate_limit_to_buckets(
+        self,
+        token: TokenInfo,
+        model_id: Optional[str],
+    ) -> None:
+        if not model_id:
+            return
+
+        if model_id == "grok-3" and token.grok3_quota is not None:
+            token.grok3_quota.remaining_tokens = 0
+            token.grok3_quota.low_remaining = 0
+            token.grok3_quota.high_remaining = 0
+        elif model_id == "grok-4" and token.grok4_quota is not None:
+            token.grok4_quota.remaining_tokens = 0
+            token.grok4_quota.low_remaining = 0
+            token.grok4_quota.high_remaining = 0
+        elif (
+            model_id
+            in {"grok-imagine-1.0", "grok-imagine-1.0-fast", "grok-imagine-1.0-video"}
+            and token.grok3_quota is not None
+        ):
+            token.grok3_quota.high_remaining = 0
+        elif model_id == "grok-4-1-thinking-1129" and token.grok41_queries is not None:
+            token.grok41_queries = 0
+        elif model_id == "grok-420" and token.grok420_queries is not None:
+            token.grok420_queries = 0
+
     def _apply_synced_usage_result(
         self,
         token: TokenInfo,
@@ -313,9 +384,11 @@ class TokenManager:
         token.grok420_queries = grok420_queries
         token.model_cooldowns = self._extract_model_cooldowns(raw_data)
 
-        new_quota = result.get("remainingTokens")
-        if new_quota is None and grok3_quota is not None:
-            new_quota = grok3_quota.remaining_tokens
+        new_quota = self._compute_effective_quota(
+            grok3_quota,
+            grok4_quota,
+            fallback=result.get("remainingTokens"),
+        )
         if new_quota is None:
             return None
 
@@ -487,6 +560,7 @@ class TokenManager:
         pool_name: str = "ssoBasic",
         exclude: set = None,
         prefer_tags: Optional[Set[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         获取可用 Token
@@ -503,7 +577,11 @@ class TokenManager:
             logger.debug(f"Pool '{pool_name}' not found")
             return None
 
-        token_info = pool.select(exclude=exclude, prefer_tags=prefer_tags)
+        token_info = pool.select(
+            exclude=exclude,
+            prefer_tags=prefer_tags,
+            model_id=self._normalize_model_id(model_id),
+        )
         if not token_info:
             logger.debug(f"No available token in pool '{pool_name}'")
             return None
@@ -514,7 +592,10 @@ class TokenManager:
         return token
 
     def get_token_info(
-        self, pool_name: str = "ssoBasic", prefer_tags: Optional[Set[str]] = None
+        self,
+        pool_name: str = "ssoBasic",
+        prefer_tags: Optional[Set[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Optional["TokenInfo"]:
         """
         获取可用 Token 的完整信息
@@ -530,7 +611,10 @@ class TokenManager:
             logger.debug(f"Pool '{pool_name}' not found")
             return None
 
-        token_info = pool.select(prefer_tags=prefer_tags)
+        token_info = pool.select(
+            prefer_tags=prefer_tags,
+            model_id=self._normalize_model_id(model_id),
+        )
         if not token_info:
             logger.debug(f"No available token in pool '{pool_name}'")
             return None
@@ -573,7 +657,10 @@ class TokenManager:
             ordered_pools = [primary_pool, fallback_pool]
 
         for idx, pool_name in enumerate(ordered_pools):
-            token_info = self.get_token_info(pool_name)
+            token_info = self.get_token_info(
+                pool_name,
+                model_id="grok-imagine-1.0-video",
+            )
             if token_info:
                 if idx == 0:
                     logger.info(
@@ -816,32 +903,72 @@ class TokenManager:
         logger.warning(f"Token {raw_token[:10]}...: not found for failure record")
         return False
 
-    async def mark_rate_limited(self, token_str: str) -> bool:
+    async def mark_rate_limited(
+        self,
+        token_str: str,
+        *,
+        model_id: Optional[str] = None,
+        retry_after_sec: Optional[float] = None,
+    ) -> bool:
         """
         将 Token 标记为配额耗尽（COOLING）
 
-        当 Grok API 返回 429 时调用，将 quota 设为 0 并标记 COOLING，
-        使该 Token 不再被选中，等待下次 Scheduler 刷新恢复。
+        当 Grok API 返回 429 时调用。优先按模型写入冷却时间，
+        避免一个模型的限流把整条 Token 直接打成 cooling。
 
         Args:
             token_str: Token 字符串
+            model_id: 发生 429 的模型
+            retry_after_sec: 上游返回的重试等待时间（秒）
 
         Returns:
             是否成功
         """
         raw_token = token_str.removeprefix("sso=")
+        normalized_model_id = self._normalize_model_id(model_id)
+        retry_after_sec = (
+            float(retry_after_sec)
+            if retry_after_sec is not None and retry_after_sec > 0
+            else float(DEFAULT_MODEL_RATE_LIMIT_COOLDOWN_SEC)
+        )
+        cooldown_until_ms = int(time.time() * 1000 + retry_after_sec * 1000)
 
         for pool in self.pools.values():
             token = pool.get(raw_token)
             if token:
                 old_quota = token.quota
-                token.quota = 0
-                token.enter_cooling()
-                logger.warning(
-                    f"Token {raw_token[:10]}...: marked as rate limited "
-                    f"(quota {old_quota} -> 0, status -> cooling)"
-                )
-                self._track_token_change(token, pool.name, "state")
+                old_status = token.status
+                change_kind = "usage"
+
+                if normalized_model_id:
+                    token.clear_expired_model_cooldowns()
+                    token.model_cooldowns[normalized_model_id] = cooldown_until_ms
+                    self._apply_model_rate_limit_to_buckets(token, normalized_model_id)
+
+                    effective_quota = self._recompute_effective_quota_for_token(token)
+                    if effective_quota is not None:
+                        if self._is_consumed_mode():
+                            token.update_quota_with_consumed(effective_quota)
+                        else:
+                            token.update_quota(effective_quota)
+
+                    if token.status != old_status:
+                        change_kind = "state"
+                    logger.warning(
+                        f"Token {raw_token[:10]}...: marked model rate limited "
+                        f"(model={normalized_model_id}, quota {old_quota} -> {token.quota}, "
+                        f"cooldown={int(retry_after_sec)}s, status={token.status})"
+                    )
+                else:
+                    token.quota = 0
+                    token.enter_cooling()
+                    change_kind = "state"
+                    logger.warning(
+                        f"Token {raw_token[:10]}...: marked as rate limited "
+                        f"(quota {old_quota} -> 0, status -> cooling)"
+                    )
+
+                self._track_token_change(token, pool.name, change_kind)
                 self._schedule_save()
                 return True
 

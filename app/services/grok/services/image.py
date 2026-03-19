@@ -18,8 +18,13 @@ from app.core.storage import DATA_DIR
 from app.core.exceptions import AppException, ErrorType, UpstreamException
 from app.services.grok.utils.process import BaseProcessor
 from app.services.grok.utils.retry import pick_token, rate_limited
-from app.services.grok.utils.response import make_response_id, make_chat_chunk, wrap_image_content
+from app.services.grok.utils.response import (
+    make_response_id,
+    make_chat_chunk,
+    wrap_image_content,
+)
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.reverse.utils.retry import extract_retry_after
 from app.services.token import EffortType
 from app.services.reverse.ws_imagine import ImagineWebSocketReverse
 
@@ -108,7 +113,11 @@ class ImageGenerationService:
                         if rate_limited(e):
                             if yielded:
                                 raise
-                            await token_mgr.mark_rate_limited(current_token)
+                            await token_mgr.mark_rate_limited(
+                                current_token,
+                                model_id=model_info.model_id,
+                                retry_after_sec=extract_retry_after(e),
+                            )
                             logger.warning(
                                 f"Token {current_token[:10]}... rate limited (429), "
                                 f"trying next token (attempt {attempt + 1}/{max_token_retries})"
@@ -162,7 +171,11 @@ class ImageGenerationService:
             except UpstreamException as e:
                 last_error = e
                 if rate_limited(e):
-                    await token_mgr.mark_rate_limited(current_token)
+                    await token_mgr.mark_rate_limited(
+                        current_token,
+                        model_id=model_info.model_id,
+                        retry_after_sec=extract_retry_after(e),
+                    )
                     logger.warning(
                         f"Token {current_token[:10]}... rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
@@ -315,7 +328,9 @@ class ImageGenerationService:
                         )
                     for recovery_token in recovery_tokens:
                         extra_tasks.append(
-                            _fetch_batch(min(expected_per_call, remaining), recovery_token)
+                            _fetch_batch(
+                                min(expected_per_call, remaining), recovery_token
+                            )
                         )
                 else:
                     extra_tasks = [
@@ -327,7 +342,9 @@ class ImageGenerationService:
                     logger.warning("No tokens available for recovery attempts")
                     extra_results = []
                 else:
-                    extra_results = await asyncio.gather(*extra_tasks, return_exceptions=True)
+                    extra_results = await asyncio.gather(
+                        *extra_tasks, return_exceptions=True
+                    )
                 for batch in extra_results:
                     if isinstance(batch, Exception):
                         logger.warning(f"WS recovery batch failed: {batch}")
@@ -441,7 +458,9 @@ class ImageWSBaseProcessor(BaseProcessor):
             return "jpg"
         return None
 
-    def _filename(self, image_id: str, is_final: bool, ext: Optional[str] = None) -> str:
+    def _filename(
+        self, image_id: str, is_final: bool, ext: Optional[str] = None
+    ) -> str:
         if ext:
             ext = ext.lower()
             if ext == "jpeg":
@@ -728,7 +747,10 @@ class ImageWSStreamProcessor(ImageWSBaseProcessor):
                             "total_tokens": 0,
                             "input_tokens": 0,
                             "output_tokens": 0,
-                            "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
+                            "input_tokens_details": {
+                                "text_tokens": 0,
+                                "image_tokens": 0,
+                            },
                         },
                     },
                 )

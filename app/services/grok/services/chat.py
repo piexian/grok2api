@@ -24,6 +24,7 @@ from app.services.grok.utils.upload import UploadService
 from app.services.grok.utils import process as proc_base
 from app.services.grok.utils.retry import pick_token, rate_limited, transient_upstream
 from app.services.reverse.app_chat import AppChatReverse
+from app.services.reverse.utils.retry import extract_retry_after
 from app.services.reverse.utils.session import ResettableSession
 from app.services.grok.utils.stream import wrap_stream_with_usage
 from app.services.grok.utils.tool_call import (
@@ -204,9 +205,7 @@ class MessageExtractor:
                     if not isinstance(arguments, str):
                         arguments = str(arguments)
                     arguments = arguments.strip()
-                    parts.append(
-                        f"[tool_call] {name} {arguments}".strip()
-                    )
+                    parts.append(f"[tool_call] {name} {arguments}".strip())
 
             if parts:
                 role_label = role
@@ -326,7 +325,10 @@ class GrokChatService:
         mode = model_info.model_mode
         # 提取消息和附件
         message, file_attachments, image_attachments = MessageExtractor.extract(
-            messages, tools=tools, tool_choice=tool_choice, parallel_tool_calls=parallel_tool_calls
+            messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
         )
         logger.debug(
             "Extracted message length=%s, files=%s, images=%s",
@@ -442,14 +444,22 @@ class ChatService:
                 # 处理响应
                 if is_stream:
                     logger.debug(f"Processing stream response: model={model}")
-                    processor = StreamProcessor(model_name, token, show_think, tools=tools, tool_choice=tool_choice)
+                    processor = StreamProcessor(
+                        model_name,
+                        token,
+                        show_think,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                    )
                     return wrap_stream_with_usage(
                         processor.process(response), token_mgr, token, model
                     )
 
                 # 非流式
                 logger.debug(f"Processing non-stream response: model={model}")
-                result = await CollectProcessor(model_name, token, tools=tools, tool_choice=tool_choice).process(response)
+                result = await CollectProcessor(
+                    model_name, token, tools=tools, tool_choice=tool_choice
+                ).process(response)
                 try:
                     model_info = ModelService.get(model)
                     effort = (
@@ -468,7 +478,11 @@ class ChatService:
 
                 if rate_limited(e):
                     # 配额不足，标记 token 为 cooling 并换 token 重试
-                    await token_mgr.mark_rate_limited(token)
+                    await token_mgr.mark_rate_limited(
+                        token,
+                        model_id=model,
+                        retry_after_sec=extract_retry_after(e),
+                    )
                     logger.warning(
                         f"Token {token[:10]}... rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
@@ -478,7 +492,11 @@ class ChatService:
                 if transient_upstream(e):
                     has_alternative_token = False
                     for pool_name in ModelService.pool_candidates_for_model(model):
-                        if token_mgr.get_token(pool_name, exclude=tried_tokens):
+                        if token_mgr.get_token(
+                            pool_name,
+                            exclude=tried_tokens,
+                            model_id=model,
+                        ):
                             has_alternative_token = True
                             break
                     if not has_alternative_token:
@@ -506,7 +524,14 @@ class ChatService:
 class StreamProcessor(proc_base.BaseProcessor):
     """Stream response processor."""
 
-    def __init__(self, model: str, token: str = "", show_think: bool = None, tools: List[Dict[str, Any]] = None, tool_choice: Any = None):
+    def __init__(
+        self,
+        model: str,
+        token: str = "",
+        show_think: bool = None,
+        tools: List[Dict[str, Any]] = None,
+        tool_choice: Any = None,
+    ):
         super().__init__(model, token)
         self.response_id: str = None
         self.fingerprint: str = ""
@@ -516,9 +541,7 @@ class StreamProcessor(proc_base.BaseProcessor):
         self.image_think_active: bool = False
         self.role_sent: bool = False
         self.filter_tags = get_config("app.filter_tags")
-        self.tool_usage_enabled = (
-            "xai:tool_usage_card" in (self.filter_tags or [])
-        )
+        self.tool_usage_enabled = "xai:tool_usage_card" in (self.filter_tags or [])
         self._tool_usage_opened = False
         self._tool_usage_buffer = ""
 
@@ -691,7 +714,13 @@ class StreamProcessor(proc_base.BaseProcessor):
         self._tool_state = "text"
         return events
 
-    def _sse(self, content: str = "", role: str = None, finish: str = None, tool_calls: list = None) -> str:
+    def _sse(
+        self,
+        content: str = "",
+        role: str = None,
+        finish: str = None,
+        tool_calls: list = None,
+    ) -> str:
         """Build SSE response."""
         delta = {}
         if role:
@@ -714,7 +743,9 @@ class StreamProcessor(proc_base.BaseProcessor):
         }
         return f"data: {orjson.dumps(chunk).decode()}\n\n"
 
-    async def process(self, response: AsyncIterable[bytes]) -> AsyncGenerator[str, None]:
+    async def process(
+        self, response: AsyncIterable[bytes]
+    ) -> AsyncGenerator[str, None]:
         """Process stream response.
 
         Args:
@@ -762,9 +793,7 @@ class StreamProcessor(proc_base.BaseProcessor):
                         self.think_opened = True
                     idx = img.get("imageIndex", 0) + 1
                     progress = img.get("progress", 0)
-                    yield self._sse(
-                        f"正在生成第{idx}张图片中，当前进度{progress}%\n"
-                    )
+                    yield self._sse(f"正在生成第{idx}张图片中，当前进度{progress}%\n")
                     continue
 
                 if mr := resp.get("modelResponse"):
@@ -812,15 +841,18 @@ class StreamProcessor(proc_base.BaseProcessor):
                 if (token := resp.get("token")) is not None:
                     if not token:
                         continue
-                    if is_thinking and self.think_closed_once and not self.image_think_active:
+                    if (
+                        is_thinking
+                        and self.think_closed_once
+                        and not self.image_think_active
+                    ):
                         continue
                     filtered = self._filter_token(token)
                     if not filtered:
                         continue
                     in_think = (
-                        (is_thinking and not self.think_closed_once)
-                        or self.image_think_active
-                    )
+                        is_thinking and not self.think_closed_once
+                    ) or self.image_think_active
                     if in_think:
                         if not self.show_think:
                             continue
@@ -902,7 +934,13 @@ class StreamProcessor(proc_base.BaseProcessor):
 class CollectProcessor(proc_base.BaseProcessor):
     """Non-stream response processor."""
 
-    def __init__(self, model: str, token: str = "", tools: List[Dict[str, Any]] = None, tool_choice: Any = None):
+    def __init__(
+        self,
+        model: str,
+        token: str = "",
+        tools: List[Dict[str, Any]] = None,
+        tool_choice: Any = None,
+    ):
         super().__init__(model, token)
         self.filter_tags = get_config("app.filter_tags")
         self.tools = tools
@@ -988,6 +1026,7 @@ class CollectProcessor(proc_base.BaseProcessor):
                         card_map[card_id] = (title, original)
 
                     if content and card_map:
+
                         def _render_card(match: re.Match) -> str:
                             card_id = match.group(1)
                             item = card_map.get(card_id)
@@ -1048,7 +1087,11 @@ class CollectProcessor(proc_base.BaseProcessor):
                 )
                 raise UpstreamException(
                     message="Upstream connection closed unexpectedly",
-                    details={"error": str(e), "type": "http2_stream_error", "status": 502},
+                    details={
+                        "error": str(e),
+                        "type": "http2_stream_error",
+                        "status": 502,
+                    },
                 )
             logger.error(f"Collect request error: {e}", extra={"model": self.model})
             raise UpstreamException(

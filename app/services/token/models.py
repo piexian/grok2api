@@ -9,6 +9,7 @@ Token 数据模型
 """
 
 from enum import Enum
+import time
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
@@ -129,10 +130,87 @@ class TokenInfo(BaseModel):
             raise ValueError("token cannot be empty")
         return token
 
-    def is_available(self, consumed_mode: bool = False) -> bool:
+    def clear_expired_model_cooldowns(self, now_ms: Optional[int] = None) -> bool:
+        """Remove expired model cooldown markers."""
+        if not self.model_cooldowns:
+            return False
+        now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+        expired = [
+            model_id
+            for model_id, until_ms in self.model_cooldowns.items()
+            if not until_ms or until_ms <= now_ms
+        ]
+        if not expired:
+            return False
+        for model_id in expired:
+            self.model_cooldowns.pop(model_id, None)
+        return True
+
+    def get_model_remaining(self, model_id: Optional[str]) -> Optional[int]:
+        """Return model-specific remaining quota when available."""
+        if not model_id:
+            return None
+
+        if model_id == "grok-3":
+            return (
+                int(self.grok3_quota.remaining_tokens)
+                if self.grok3_quota is not None
+                else None
+            )
+        if model_id == "grok-4":
+            return (
+                int(self.grok4_quota.remaining_tokens)
+                if self.grok4_quota is not None
+                else None
+            )
+        if model_id == "grok-4-1-thinking-1129":
+            return int(self.grok41_queries) if self.grok41_queries is not None else None
+        if model_id == "grok-420":
+            return (
+                int(self.grok420_queries) if self.grok420_queries is not None else None
+            )
+        if model_id in {
+            "grok-imagine-1.0",
+            "grok-imagine-1.0-fast",
+            "grok-imagine-1.0-video",
+        }:
+            return (
+                int(self.grok3_quota.high_remaining)
+                if self.grok3_quota is not None
+                else None
+            )
+        return None
+
+    def is_model_cooling(
+        self,
+        model_id: Optional[str],
+        now_ms: Optional[int] = None,
+    ) -> bool:
+        """Check whether the given model is still cooling down."""
+        if not model_id:
+            return False
+        self.clear_expired_model_cooldowns(now_ms=now_ms)
+        until_ms = self.model_cooldowns.get(model_id)
+        if not until_ms:
+            return False
+        now_ms = int(time.time() * 1000) if now_ms is None else now_ms
+        return until_ms > now_ms
+
+    def is_available(
+        self,
+        consumed_mode: bool = False,
+        model_id: Optional[str] = None,
+    ) -> bool:
         """检查当前模式下 token 是否可用。"""
         if self.status != TokenStatus.ACTIVE:
             return False
+        if self.is_model_cooling(model_id):
+            return False
+
+        model_remaining = self.get_model_remaining(model_id)
+        if model_remaining is not None:
+            return model_remaining > 0
+
         if consumed_mode:
             return True
         return self.quota > 0

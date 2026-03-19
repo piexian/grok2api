@@ -24,12 +24,17 @@ from app.core.exceptions import (
 from app.core.logger import logger
 from app.services.grok.services.model import ModelService
 from app.services.grok.utils.download import DownloadService
-from app.services.grok.utils.process import _is_http2_error, _normalize_line, _with_idle_timeout
+from app.services.grok.utils.process import (
+    _is_http2_error,
+    _normalize_line,
+    _with_idle_timeout,
+)
 from app.services.grok.utils.retry import rate_limited
 from app.services.grok.utils.stream import wrap_stream_with_usage
 from app.services.reverse.app_chat import AppChatReverse
 from app.services.reverse.media_post import MediaPostReverse
 from app.services.reverse.media_post_link import MediaPostLinkReverse
+from app.services.reverse.utils.retry import extract_retry_after
 from app.services.reverse.utils.session import ResettableSession
 from app.services.reverse.video_upscale import VideoUpscaleReverse
 from app.services.token import EffortType, get_token_manager
@@ -106,7 +111,9 @@ async def _create_public_video_link(token: str, video_url: str) -> str:
         async with _new_session() as session:
             response = await MediaPostLinkReverse.request(session, token, video_id)
         payload = response.json() if response is not None else {}
-        share_link = _pick_str(payload.get("shareLink")) if isinstance(payload, dict) else ""
+        share_link = (
+            _pick_str(payload.get("shareLink")) if isinstance(payload, dict) else ""
+        )
         if share_link:
             if share_link.endswith(".mp4"):
                 logger.info(f"Video public link created: {share_link}")
@@ -305,7 +312,9 @@ def _extract_post_id_candidates(resp: Dict[str, Any]) -> List[Tuple[int, str]]:
     return candidates
 
 
-def _apply_post_id_candidates(result: VideoRoundResult, candidates: List[Tuple[int, str]]):
+def _apply_post_id_candidates(
+    result: VideoRoundResult, candidates: List[Tuple[int, str]]
+):
     for rank, value in candidates:
         if rank < result.post_id_rank:
             result.post_id_rank = rank
@@ -371,7 +380,9 @@ async def _iter_round_events(
                 rid = _pick_str(model_resp.get("responseId"))
                 if rid:
                     result.response_id = rid
-                _append_unique_errors(result.stream_errors, model_resp.get("streamErrors"))
+                _append_unique_errors(
+                    result.stream_errors, model_resp.get("streamErrors")
+                )
 
             _apply_post_id_candidates(result, _extract_post_id_candidates(resp))
 
@@ -447,7 +458,9 @@ async def _collect_round_result(
     source: str,
 ) -> VideoRoundResult:
     result = VideoRoundResult()
-    async for event_type, payload in _iter_round_events(response, model=model, source=source):
+    async for event_type, payload in _iter_round_events(
+        response, model=model, source=source
+    ):
         if event_type == "done":
             result = payload
     return result
@@ -478,7 +491,9 @@ def _ensure_round_result(
     final_round: bool,
 ):
     if not result.post_id:
-        err_type = "moderated_or_stream_errors" if result.stream_errors else "missing_post_id"
+        err_type = (
+            "moderated_or_stream_errors" if result.stream_errors else "missing_post_id"
+        )
         raise UpstreamException(
             message=f"Video round {round_index}/{total_rounds} missing post_id",
             status_code=502,
@@ -650,7 +665,9 @@ class _VideoChainSSEWriter:
         self.role_sent = True
         return [self._sse(role="assistant")]
 
-    def emit_progress(self, *, round_index: int, total_rounds: int, progress: Any) -> List[str]:
+    def emit_progress(
+        self, *, round_index: int, total_rounds: int, progress: Any
+    ) -> List[str]:
         if not self.show_think:
             return []
 
@@ -661,7 +678,9 @@ class _VideoChainSSEWriter:
 
         progress_text = _format_progress(progress)
         chunks.append(
-            self._sse(f"[round={round_index}/{total_rounds}] progress={progress_text}%\n")
+            self._sse(
+                f"[round={round_index}/{total_rounds}] progress={progress_text}%\n"
+            )
         )
         return chunks
 
@@ -841,7 +860,6 @@ class VideoService:
 
         target_length = int(video_length or 6)
         round_plan = _build_round_plan(target_length, is_super=is_super_pool)
-        total_rounds = len(round_plan)
 
         service = VideoService()
         message = _build_message(prompt, preset)
@@ -944,7 +962,11 @@ class VideoService:
                         final_round=(plan.round_index == plan.total_rounds),
                     )
 
-                    if should_upscale and upscale_timing == "single" and round_result.video_url:
+                    if (
+                        should_upscale
+                        and upscale_timing == "single"
+                        and round_result.video_url
+                    ):
                         for chunk in writer.emit_note(
                             f"[round={plan.round_index}/{plan.total_rounds}] 正在对当前轮结果进行超分辨率\n"
                         ):
@@ -978,14 +1000,18 @@ class VideoService:
                 if should_upscale and upscale_timing == "complete":
                     for chunk in writer.emit_note("正在对视频进行超分辨率\n"):
                         yield chunk
-                    final_video_url, upscaled = await _upscale_video_url(token, final_video_url)
+                    final_video_url, upscaled = await _upscale_video_url(
+                        token, final_video_url
+                    )
                     if not upscaled:
                         logger.warning("Video upscale failed, fallback to 480p result")
 
                 if _public_asset_enabled():
                     for chunk in writer.emit_note("正在生成可公开访问链接\n"):
                         yield chunk
-                    final_video_url = await _create_public_video_link(token, final_video_url)
+                    final_video_url = await _create_public_video_link(
+                        token, final_video_url
+                    )
 
                 dl_service = DownloadService()
                 try:
@@ -1002,11 +1028,17 @@ class VideoService:
                 for chunk in writer.finish():
                     yield chunk
             except asyncio.CancelledError:
-                logger.debug("Video stream chain cancelled by client", extra={"model": model})
+                logger.debug(
+                    "Video stream chain cancelled by client", extra={"model": model}
+                )
                 raise
             except UpstreamException as e:
                 if rate_limited(e):
-                    await token_mgr.mark_rate_limited(token)
+                    await token_mgr.mark_rate_limited(
+                        token,
+                        model_id=model,
+                        retry_after_sec=extract_retry_after(e),
+                    )
                 raise
 
         async def _collect_chain() -> Dict[str, Any]:
@@ -1031,7 +1063,11 @@ class VideoService:
                     final_round=(plan.round_index == plan.total_rounds),
                 )
 
-                if should_upscale and upscale_timing == "single" and round_result.video_url:
+                if (
+                    should_upscale
+                    and upscale_timing == "single"
+                    and round_result.video_url
+                ):
                     upgraded_url, upscaled = await _upscale_video_url(
                         token, round_result.video_url
                     )
@@ -1059,12 +1095,16 @@ class VideoService:
 
             final_video_url = final_result.video_url
             if should_upscale and upscale_timing == "complete":
-                final_video_url, upscaled = await _upscale_video_url(token, final_video_url)
+                final_video_url, upscaled = await _upscale_video_url(
+                    token, final_video_url
+                )
                 if not upscaled:
                     logger.warning("Video upscale failed, fallback to 480p result")
 
             if _public_asset_enabled():
-                final_video_url = await _create_public_video_link(token, final_video_url)
+                final_video_url = await _create_public_video_link(
+                    token, final_video_url
+                )
 
             dl_service = DownloadService()
             try:
@@ -1092,7 +1132,11 @@ class VideoService:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
             }
 
         if is_stream:
@@ -1102,14 +1146,16 @@ class VideoService:
             result = await _collect_chain()
         except UpstreamException as e:
             if rate_limited(e):
-                await token_mgr.mark_rate_limited(token)
+                await token_mgr.mark_rate_limited(
+                    token,
+                    model_id=model,
+                    retry_after_sec=extract_retry_after(e),
+                )
             raise
 
         try:
             await token_mgr.consume(token, effort)
-            logger.debug(
-                f"Video completed, recorded usage (effort={effort.value})"
-            )
+            logger.debug(f"Video completed, recorded usage (effort={effort.value})")
         except Exception as e:
             logger.warning(f"Failed to record video usage: {e}")
 
@@ -1165,7 +1211,9 @@ class VideoStreamProcessor:
             await self._dl_service.close()
             self._dl_service = None
 
-    async def process(self, response: AsyncIterable[bytes]) -> AsyncGenerator[str, None]:
+    async def process(
+        self, response: AsyncIterable[bytes]
+    ) -> AsyncGenerator[str, None]:
         result = VideoRoundResult()
         try:
             async for event_type, payload in _iter_round_events(
@@ -1194,14 +1242,18 @@ class VideoStreamProcessor:
             if self.upscale_on_finish:
                 for chunk in self.writer.emit_note("正在对视频进行超分辨率\n"):
                     yield chunk
-                final_video_url, upscaled = await _upscale_video_url(self.token, final_video_url)
+                final_video_url, upscaled = await _upscale_video_url(
+                    self.token, final_video_url
+                )
                 if not upscaled:
                     logger.warning("Video upscale failed, fallback to 480p result")
 
             if self.enable_public_asset:
                 for chunk in self.writer.emit_note("正在生成可公开访问链接\n"):
                     yield chunk
-                final_video_url = await _create_public_video_link(self.token, final_video_url)
+                final_video_url = await _create_public_video_link(
+                    self.token, final_video_url
+                )
 
             rendered = await self._get_dl().render_video(
                 final_video_url,
@@ -1213,7 +1265,9 @@ class VideoStreamProcessor:
             for chunk in self.writer.finish():
                 yield chunk
         except asyncio.CancelledError:
-            logger.debug("Video stream cancelled by client", extra={"model": self.model})
+            logger.debug(
+                "Video stream cancelled by client", extra={"model": self.model}
+            )
             raise
         finally:
             await self.close()
@@ -1265,12 +1319,16 @@ class VideoCollectProcessor:
 
             final_video_url = result.video_url
             if self.upscale_on_finish:
-                final_video_url, upscaled = await _upscale_video_url(self.token, final_video_url)
+                final_video_url, upscaled = await _upscale_video_url(
+                    self.token, final_video_url
+                )
                 if not upscaled:
                     logger.warning("Video upscale failed, fallback to 480p result")
 
             if self.enable_public_asset:
-                final_video_url = await _create_public_video_link(self.token, final_video_url)
+                final_video_url = await _create_public_video_link(
+                    self.token, final_video_url
+                )
 
             content = await self._get_dl().render_video(
                 final_video_url,
@@ -1294,7 +1352,11 @@ class VideoCollectProcessor:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
             }
         finally:
             await self.close()

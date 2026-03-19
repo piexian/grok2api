@@ -3,10 +3,7 @@ Grok image edit service.
 """
 
 import asyncio
-import os
-import random
 import re
-import time
 from dataclasses import dataclass
 from typing import AsyncGenerator, AsyncIterable, List, Union, Any
 
@@ -30,10 +27,15 @@ from app.services.grok.utils.process import (
 )
 from app.services.grok.utils.upload import UploadService
 from app.services.grok.utils.retry import pick_token, rate_limited
-from app.services.grok.utils.response import make_response_id, make_chat_chunk, wrap_image_content
+from app.services.grok.utils.response import (
+    make_response_id,
+    make_chat_chunk,
+    wrap_image_content,
+)
 from app.services.grok.services.chat import GrokChatService
 from app.services.grok.services.video import VideoService
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.reverse.utils.retry import extract_retry_after
 from app.services.token import EffortType
 
 
@@ -160,7 +162,11 @@ class ImageEditService:
             except UpstreamException as e:
                 last_error = e
                 if rate_limited(e):
-                    await token_mgr.mark_rate_limited(current_token)
+                    await token_mgr.mark_rate_limited(
+                        current_token,
+                        model_id=model_info.model_id,
+                        retry_after_sec=extract_retry_after(e),
+                    )
                     logger.warning(
                         f"Token {current_token[:10]}... rate limited (429), "
                         f"trying next token (attempt {attempt + 1}/{max_token_retries})"
@@ -297,7 +303,12 @@ class ImageStreamProcessor(BaseProcessor):
     """HTTP image stream processor."""
 
     def __init__(
-        self, model: str, token: str = "", n: int = 1, response_format: str = "b64_json", chat_format: bool = False
+        self,
+        model: str,
+        token: str = "",
+        n: int = 1,
+        response_format: str = "b64_json",
+        chat_format: bool = False,
     ):
         super().__init__(model, token)
         self.partial_index = 0

@@ -4,7 +4,15 @@ import uuid
 from typing import Optional, List, Dict, Any
 
 import orjson
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -193,7 +201,10 @@ async def function_imagine_ws(websocket: WebSocket):
                 for pool_name in ModelService.pool_candidates_for_model(
                     model_info.model_id
                 ):
-                    token = token_mgr.get_token(pool_name)
+                    token = token_mgr.get_token(
+                        pool_name,
+                        model_id=model_info.model_id,
+                    )
                     if token:
                         break
 
@@ -324,6 +335,7 @@ async def function_imagine_ws(websocket: WebSocket):
 
         try:
             from starlette.websockets import WebSocketState
+
             if websocket.client_state == WebSocketState.CONNECTED:
                 await websocket.close(code=1000, reason="Server closing connection")
         except Exception as e:
@@ -350,11 +362,15 @@ async def function_imagine_sse(
         function_enabled = is_function_enabled()
         if not function_key:
             if not function_enabled:
-                raise HTTPException(status_code=401, detail="Function access is disabled")
+                raise HTTPException(
+                    status_code=401, detail="Function access is disabled"
+                )
         else:
             key = request.query_params.get("function_key")
             if key != function_key:
-                raise HTTPException(status_code=401, detail="Invalid authentication token")
+                raise HTTPException(
+                    status_code=401, detail="Invalid authentication token"
+                )
 
     if session:
         prompt = str(session.get("prompt") or "").strip()
@@ -402,7 +418,10 @@ async def function_imagine_sse(
                     for pool_name in ModelService.pool_candidates_for_model(
                         model_info.model_id
                     ):
-                        token = token_mgr.get_token(pool_name)
+                        token = token_mgr.get_token(
+                            pool_name,
+                            model_id=model_info.model_id,
+                        )
                         if token:
                             break
 

@@ -5,8 +5,6 @@ Chat Completions API 路由
 from typing import Any, AsyncGenerator, AsyncIterable, Dict, List, Optional, Union
 import base64
 import binascii
-import time
-import uuid
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -37,12 +35,15 @@ class MessageItem(BaseModel):
 class VideoConfig(BaseModel):
     """视频生成配置"""
 
-    aspect_ratio: Optional[str] = Field("3:2", description="视频比例: 1280x720(16:9), 720x1280(9:16), 1792x1024(3:2), 1024x1792(2:3), 1024x1024(1:1)")
+    aspect_ratio: Optional[str] = Field(
+        "3:2",
+        description="视频比例: 1280x720(16:9), 720x1280(9:16), 1792x1024(3:2), 1024x1792(2:3), 1024x1024(1:1)",
+    )
     video_length: Optional[int] = Field(6, description="视频时长(秒): 6-30")
     resolution_name: Optional[str] = Field("480p", description="视频分辨率: 480p, 720p")
     preset: Optional[str] = Field("custom", description="风格预设: fun, normal, spicy")
 
-      
+
 class ImageConfig(BaseModel):
     """图片生成配置"""
 
@@ -57,7 +58,9 @@ class ChatCompletionRequest(BaseModel):
     model: str = Field(..., description="模型名称")
     messages: List[MessageItem] = Field(..., description="消息数组")
     stream: Optional[bool] = Field(None, description="是否流式输出")
-    reasoning_effort: Optional[str] = Field(None, description="推理强度: none/minimal/low/medium/high/xhigh")
+    reasoning_effort: Optional[str] = Field(
+        None, description="推理强度: none/minimal/low/medium/high/xhigh"
+    )
     temperature: Optional[float] = Field(0.8, description="采样温度: 0-2")
     top_p: Optional[float] = Field(0.95, description="nucleus 采样: 0-1")
     # 视频生成配置
@@ -66,8 +69,12 @@ class ChatCompletionRequest(BaseModel):
     image_config: Optional[ImageConfig] = Field(None, description="图片生成参数")
     # Tool calling
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Tool definitions")
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(None, description="Tool choice: auto/required/none/specific")
-    parallel_tool_calls: Optional[bool] = Field(True, description="Allow parallel tool calls")
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+        None, description="Tool choice: auto/required/none/specific"
+    )
+    parallel_tool_calls: Optional[bool] = Field(
+        True, description="Allow parallel tool calls"
+    )
 
 
 VALID_ROLES = {"developer", "system", "user", "assistant", "tool"}
@@ -173,7 +180,9 @@ def _imagine_fast_server_image_config() -> ImageConfig:
     n = int(get_config("imagine_fast.n", 1) or 1)
     size = str(get_config("imagine_fast.size", "1024x1024") or "1024x1024")
     response_format = str(
-        get_config("imagine_fast.response_format", get_config("app.image_format") or "url")
+        get_config(
+            "imagine_fast.response_format", get_config("app.image_format") or "url"
+        )
         or "url"
     )
     return ImageConfig(n=n, size=size, response_format=response_format)
@@ -234,6 +243,7 @@ def _streaming_error_response(exc: Exception) -> StreamingResponse:
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
+
 def _validate_image_config(image_conf: ImageConfig, *, stream: bool):
     n = image_conf.n or 1
     if n < 1 or n > 10:
@@ -262,6 +272,8 @@ def _validate_image_config(image_conf: ImageConfig, *, stream: bool):
             param="image_config.size",
             code="invalid_size",
         )
+
+
 def validate_request(request: ChatCompletionRequest):
     """验证请求参数"""
     # 验证模型
@@ -566,7 +578,9 @@ def validate_request(request: ChatCompletionRequest):
                     code="invalid_tool_choice",
                 )
         elif isinstance(request.tool_choice, dict):
-            if request.tool_choice.get("type") != "function" or not request.tool_choice.get("function", {}).get("name"):
+            if request.tool_choice.get(
+                "type"
+            ) != "function" or not request.tool_choice.get("function", {}).get("name"):
                 raise ValidationException(
                     message="tool_choice object must have type='function' and function.name",
                     param="tool_choice",
@@ -583,7 +597,11 @@ def validate_request(request: ChatCompletionRequest):
                 param="messages",
                 code="empty_prompt",
             )
-        image_conf = _imagine_fast_server_image_config() if request.model == IMAGINE_FAST_MODEL_ID else (request.image_config or ImageConfig())
+        image_conf = (
+            _imagine_fast_server_image_config()
+            if request.model == IMAGINE_FAST_MODEL_ID
+            else (request.image_config or ImageConfig())
+        )
         n = image_conf.n or 1
         if not (1 <= n <= 10):
             raise ValidationException(
@@ -707,7 +725,6 @@ async def chat_completions(request: ChatCompletionRequest):
         image_conf = request.image_config or ImageConfig()
         _validate_image_config(image_conf, stream=bool(is_stream))
         response_format = _resolve_image_format(image_conf.response_format)
-        response_field = _image_field(response_format)
         n = image_conf.n or 1
 
         token_mgr = await get_token_manager()
@@ -715,7 +732,7 @@ async def chat_completions(request: ChatCompletionRequest):
 
         token = None
         for pool_name in ModelService.pool_candidates_for_model(request.model):
-            token = token_mgr.get_token(pool_name)
+            token = token_mgr.get_token(pool_name, model_id=request.model)
             if token:
                 break
 
@@ -747,9 +764,7 @@ async def chat_completions(request: ChatCompletionRequest):
             )
 
         content = result.data[0] if result.data else ""
-        return JSONResponse(
-            content=make_chat_response(request.model, content)
-        )
+        return JSONResponse(content=make_chat_response(request.model, content))
 
     if model_info and model_info.is_image:
         prompt, _ = _extract_prompt_images(request.messages)
@@ -757,10 +772,13 @@ async def chat_completions(request: ChatCompletionRequest):
         is_stream = (
             request.stream if request.stream is not None else get_config("app.stream")
         )
-        image_conf = _imagine_fast_server_image_config() if request.model == IMAGINE_FAST_MODEL_ID else (request.image_config or ImageConfig())
+        image_conf = (
+            _imagine_fast_server_image_config()
+            if request.model == IMAGINE_FAST_MODEL_ID
+            else (request.image_config or ImageConfig())
+        )
         _validate_image_config(image_conf, stream=bool(is_stream))
         response_format = _resolve_image_format(image_conf.response_format)
-        response_field = _image_field(response_format)
         n = image_conf.n or 1
         size = image_conf.size or "1024x1024"
         aspect_ratio_map = {
@@ -777,7 +795,7 @@ async def chat_completions(request: ChatCompletionRequest):
 
         token = None
         for pool_name in ModelService.pool_candidates_for_model(request.model):
-            token = token_mgr.get_token(pool_name)
+            token = token_mgr.get_token(pool_name, model_id=request.model)
             if token:
                 break
 

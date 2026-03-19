@@ -128,7 +128,6 @@ async function loadData() {
       allTokens = data.tokens;
       consumedModeEnabled = data.consumed_mode_enabled || false;
       processTokens(data.tokens);
-      updateQuotaHeader();
       updateStats();
       renderTable();
     } else if (res.status === 401) {
@@ -196,22 +195,6 @@ function processTokens(data) {
 
 function hasBucketQuotaData(item) {
   return !!(item && (item.grok3_quota || item.grok4_quota));
-}
-
-function updateQuotaHeader() {
-  const thQuota = document.getElementById('th-quota');
-  if (thQuota) {
-    if (flatTokens.some(hasBucketQuotaData)) {
-      thQuota.textContent = t('token.tableBucketQuota');
-      thQuota.dataset.i18n = 'token.tableBucketQuota';
-    } else if (consumedModeEnabled) {
-      thQuota.textContent = t('token.tableQuotaConsumed');
-      thQuota.dataset.i18n = 'token.tableQuotaConsumed';
-    } else {
-      thQuota.textContent = t('token.tableQuota');
-      thQuota.dataset.i18n = 'token.tableQuota';
-    }
-  }
 }
 
 function setBar(id, value, max, color) {
@@ -435,40 +418,51 @@ function renderTable() {
     }
     tdStatus.innerHTML = statusHtml;
 
-    // Quota
-    const tdQuota = document.createElement('td');
-    if (hasBucketQuotaData(item)) {
-      tdQuota.className = 'text-left text-xs';
-      let quotaHtml = '<div class="quota-multi">';
-      if (item.grok3_quota) {
-        const g3 = item.grok3_quota;
-        const g3Pct = g3.total_tokens ? Math.round((g3.remaining_tokens / g3.total_tokens) * 100) : 0;
-        quotaHtml += `<div class="quota-row">
-          <span class="quota-label">G3</span>
-          <div class="quota-bar-mini"><div class="quota-fill" style="width:${g3Pct}%"></div></div>
-          <span class="quota-num">${g3.remaining_tokens}/${g3.total_tokens}</span>
-        </div>`;
-      }
-      if (item.grok4_quota) {
-        const g4 = item.grok4_quota;
-        const g4Pct = g4.total_tokens ? Math.round((g4.remaining_tokens / g4.total_tokens) * 100) : 0;
-        quotaHtml += `<div class="quota-row">
-          <span class="quota-label">G4</span>
-          <div class="quota-bar-mini"><div class="quota-fill quota-fill-blue" style="width:${g4Pct}%"></div></div>
-          <span class="quota-num">${g4.remaining_tokens}/${g4.total_tokens}</span>
-        </div>`;
-      }
-      quotaHtml += '</div>';
-      tdQuota.innerHTML = quotaHtml;
-      tdQuota.title = t('token.tableBucketQuota');
+    // G3 quota
+    const tdG3 = document.createElement('td');
+    tdG3.className = 'text-center font-mono text-xs';
+    if (item.grok3_quota) {
+      tdG3.innerText = item.grok3_quota.remaining_tokens;
+      if (item.grok3_quota.remaining_tokens === 0) tdG3.classList.add('text-red-500');
     } else if (consumedModeEnabled) {
-      tdQuota.className = 'text-center font-mono text-xs';
-      tdQuota.innerText = item.consumed;
-      tdQuota.title = t('token.tableQuotaConsumed');
+      tdG3.innerText = item.consumed;
+      tdG3.classList.add('text-gray-500');
     } else {
-      tdQuota.className = 'text-center font-mono text-xs';
-      tdQuota.innerText = item.quota;
-      tdQuota.title = t('token.tableQuota');
+      tdG3.innerText = item.quota != null ? item.quota : '-';
+      tdG3.classList.add('text-gray-500');
+    }
+
+    // G4 quota
+    const tdG4 = document.createElement('td');
+    tdG4.className = 'text-center font-mono text-xs';
+    if (item.grok4_quota) {
+      tdG4.innerText = item.grok4_quota.remaining_tokens;
+      if (item.grok4_quota.remaining_tokens === 0) tdG4.classList.add('text-red-500');
+    } else {
+      tdG4.innerText = '-';
+      tdG4.classList.add('text-gray-400');
+    }
+
+    // G4.1 probe
+    const tdG41 = document.createElement('td');
+    tdG41.className = 'text-center font-mono text-xs';
+    if (item.grok41_queries != null) {
+      tdG41.innerText = item.grok41_queries;
+      if (item.grok41_queries === 0) tdG41.classList.add('text-red-500');
+    } else {
+      tdG41.innerText = '-';
+      tdG41.classList.add('text-gray-400');
+    }
+
+    // G4.2 probe
+    const tdG42 = document.createElement('td');
+    tdG42.className = 'text-center font-mono text-xs';
+    if (item.grok420_queries != null) {
+      tdG42.innerText = item.grok420_queries;
+      if (item.grok420_queries === 0) tdG42.classList.add('text-red-500');
+    } else {
+      tdG42.innerText = '-';
+      tdG42.classList.add('text-gray-400');
     }
 
     // Note (Left)
@@ -508,7 +502,10 @@ function renderTable() {
     tr.appendChild(tdToken);
     tr.appendChild(tdType);
     tr.appendChild(tdStatus);
-    tr.appendChild(tdQuota);
+    tr.appendChild(tdG3);
+    tr.appendChild(tdG4);
+    tr.appendChild(tdG41);
+    tr.appendChild(tdG42);
     tr.appendChild(tdNote);
     tr.appendChild(tdActions);
 

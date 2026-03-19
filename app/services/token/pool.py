@@ -37,7 +37,10 @@ class TokenPool:
             return False
 
     def select(
-        self, exclude: set = None, prefer_tags: Optional[Set[str]] = None
+        self,
+        exclude: set = None,
+        prefer_tags: Optional[Set[str]] = None,
+        model_id: Optional[str] = None,
     ) -> Optional[TokenInfo]:
         """
         选择一个可用 Token
@@ -63,7 +66,7 @@ class TokenPool:
             available = [
                 t
                 for t in self._tokens.values()
-                if t.is_available(consumed_mode=True)
+                if t.is_available(consumed_mode=True, model_id=model_id)
                 and (not exclude or t.token not in exclude)
             ]
 
@@ -77,19 +80,30 @@ class TokenPool:
                 ]
                 if preferred:
                     available = preferred
+
+            if model_id and any(
+                t.get_model_remaining(model_id) is not None for t in available
+            ):
+                max_remaining = max(
+                    (t.get_model_remaining(model_id) or 0) for t in available
+                )
+                available = [
+                    t
+                    for t in available
+                    if (t.get_model_remaining(model_id) or 0) == max_remaining
+                ]
 
             # 找到最小消耗（优先选择消耗少的）
             min_consumed = min(t.consumed for t in available)
             candidates = [t for t in available if t.consumed == min_consumed]
             return random.choice(candidates)
 
-
         else:
             # ===== 默认模式（旧逻辑）=====
             available = [
                 t
                 for t in self._tokens.values()
-                if t.is_available(consumed_mode=False)
+                if t.is_available(consumed_mode=False, model_id=model_id)
                 and (not exclude or t.token not in exclude)
             ]
 
@@ -103,6 +117,19 @@ class TokenPool:
                 ]
                 if preferred:
                     available = preferred
+
+            if model_id and any(
+                t.get_model_remaining(model_id) is not None for t in available
+            ):
+                max_quota = max(
+                    (t.get_model_remaining(model_id) or 0) for t in available
+                )
+                candidates = [
+                    t
+                    for t in available
+                    if (t.get_model_remaining(model_id) or 0) == max_quota
+                ]
+                return random.choice(candidates)
 
             # 找到最大额度
             max_quota = max(t.quota for t in available)
