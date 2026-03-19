@@ -58,15 +58,18 @@ class RetryContext:
             return False
         if self.total_delay >= self.retry_budget:
             return False
-        
+
         # --- 准确判定逻辑开始 ---
         # 如果已经明确判定为 Token 过期，则不进行重试
         if isinstance(error, UpstreamException) and error.details:
             if error.details.get("is_token_expired", False):
                 logger.warning("Confirmed Token Expired, skipping retries.")
                 return False
+            if error.details.get("is_token_blocked", False):
+                logger.warning("Confirmed Token Blocked, skipping retries.")
+                return False
         # --- 准确判定逻辑结束 ---
-            
+
         return True
 
     def record_error(self, status_code: int, error: Exception):
@@ -75,7 +78,9 @@ class RetryContext:
         self.last_error = error
         self.attempt += 1
 
-    def calculate_delay(self, status_code: int, retry_after: Optional[float] = None) -> float:
+    def calculate_delay(
+        self, status_code: int, retry_after: Optional[float] = None
+    ) -> float:
         """
         Calculate backoff delay time.
 
@@ -207,8 +212,11 @@ async def retry_on_status(
             if status_code is None:
                 # Error cannot be identified as retryable
                 import traceback
+
                 error_details = traceback.format_exc()
-                logger.error(f"Non-retryable error: {type(e).__name__}: {e}\n{error_details}")
+                logger.error(
+                    f"Non-retryable error: {type(e).__name__}: {e}\n{error_details}"
+                )
                 raise
 
             # Record error

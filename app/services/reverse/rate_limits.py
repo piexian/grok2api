@@ -25,7 +25,7 @@ RATE_LIMITS_API = "https://grok.com/rest/rate-limits"
 BUCKET_MODELS = ["grok-3", "grok-4"]
 
 # 探针桶（不可信，仅参考）
-PROBE_MODELS = ["grok-4-1-thinking-1129", "grok-420"]
+PROBE_MODELS = ["grok-4-1-thinking-1129", "grok420"]
 
 # 所有需要查询的模型
 ALL_MODELS = BUCKET_MODELS + PROBE_MODELS
@@ -94,6 +94,7 @@ class RateLimitsReverse:
                     # --- 识别逻辑开始 ---
                     # 区分是真正的 Token 过期还是 Cloudflare 拦截
                     is_token_expired = False
+                    is_token_blocked = False
                     server_header = response.headers.get("Server", "").lower()
                     content_type = response.headers.get("Content-Type", "").lower()
 
@@ -120,14 +121,29 @@ class RateLimitsReverse:
                         ]
                         if any(k in body_lower for k in auth_error_keywords):
                             is_token_expired = True
+
+                    if (
+                        response.status_code == 403
+                        and "application/json" in content_type
+                    ):
+                        body_lower = resp_text.lower()
+                        blocked_error_keywords = [
+                            "blocked-user",
+                            "user is blocked",
+                            "bot abuse",
+                            "account farming",
+                        ]
+                        if any(k in body_lower for k in blocked_error_keywords):
+                            is_token_blocked = True
                     # --- 识别逻辑结束 ---
 
                     logger.error(
                         "RateLimitsReverse: Request failed, model={}, status={}, "
-                        "is_token_expired={}, is_cloudflare={}, Body: {}",
+                        "is_token_expired={}, is_token_blocked={}, is_cloudflare={}, Body: {}",
                         model_name,
                         response.status_code,
                         is_token_expired,
+                        is_token_blocked,
                         is_cloudflare,
                         resp_text[:300],
                         extra={"error_type": "UpstreamException"},
@@ -145,6 +161,7 @@ class RateLimitsReverse:
                             "retry_after": response.headers.get("Retry-After")
                             or response.headers.get("retry-after"),
                             "is_token_expired": is_token_expired,
+                            "is_token_blocked": is_token_blocked,
                             "is_cloudflare": is_cloudflare,
                         },
                     )

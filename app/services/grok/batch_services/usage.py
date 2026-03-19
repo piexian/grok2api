@@ -25,30 +25,61 @@ def _get_usage_semaphore() -> asyncio.Semaphore:
     return _USAGE_SEMAPHORE
 
 
+def _get_limit_value(data: dict | None, *keys: str) -> Optional[int]:
+    """Read a limit value from top-level or nested limit objects."""
+    if not data:
+        return None
+    containers = [
+        data,
+        data.get("limits") if isinstance(data.get("limits"), dict) else None,
+        data.get("rateLimits") if isinstance(data.get("rateLimits"), dict) else None,
+    ]
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            value = container.get(key)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _parse_bucket_quota(data: dict | None) -> Optional[BucketQuota]:
     """Parse a rate-limits response into a BucketQuota."""
-    if not data or "remainingTokens" not in data:
+    if not data:
+        return None
+    remaining = _get_limit_value(data, "remainingTokens", "remainingQueries")
+    total = _get_limit_value(data, "totalTokens", "totalQueries")
+    if remaining is None:
         return None
     low = data.get("lowEffortRateLimits") or {}
     high = data.get("highEffortRateLimits") or {}
     return BucketQuota(
-        remaining_tokens=data.get("remainingTokens", 0),
-        total_tokens=data.get("totalTokens", 0),
-        low_remaining=low.get("remainingQueries", 0),
-        low_total=low.get("totalQueries", 0),
-        high_remaining=high.get("remainingQueries", 0),
-        high_total=high.get("totalQueries", 0),
+        remaining_tokens=remaining,
+        total_tokens=total or remaining,
+        low_remaining=_get_limit_value(low, "remainingQueries", "remainingTokens") or 0,
+        low_total=_get_limit_value(low, "totalQueries", "totalTokens") or 0,
+        high_remaining=_get_limit_value(high, "remainingQueries", "remainingTokens")
+        or 0,
+        high_total=_get_limit_value(high, "totalQueries", "totalTokens") or 0,
     )
 
 
 def _parse_probe_queries(data: dict | None) -> Optional[int]:
     """Parse a rate-limits response for probe models."""
-    if not data:
-        return None
-    remaining = data.get("remainingQueries")
-    if remaining is None:
-        remaining = data.get("remainingTokens")
-    return remaining
+    return _get_limit_value(data, "remainingQueries", "remainingTokens")
+
+
+def _pick_model_payload(raw: dict[str, Any], *keys: str) -> dict | None:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 class UsageService:
@@ -122,10 +153,14 @@ class UsageService:
             async with session_ctx as session:
                 raw = await RateLimitsReverse.request_multi(session, token)
 
-        grok3_quota = _parse_bucket_quota(raw.get("grok-3"))
-        grok4_quota = _parse_bucket_quota(raw.get("grok-4"))
-        grok41_queries = _parse_probe_queries(raw.get("grok-4-1-thinking-1129"))
-        grok420_queries = _parse_probe_queries(raw.get("grok-420"))
+        grok3_quota = _parse_bucket_quota(_pick_model_payload(raw, "grok-3"))
+        grok4_quota = _parse_bucket_quota(_pick_model_payload(raw, "grok-4"))
+        grok41_queries = _parse_probe_queries(
+            _pick_model_payload(raw, "grok-4-1-thinking-1129")
+        )
+        grok420_queries = _parse_probe_queries(
+            _pick_model_payload(raw, "grok420", "grok-420")
+        )
         remaining_tokens = (
             grok3_quota.remaining_tokens if grok3_quota is not None else None
         )

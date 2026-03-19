@@ -261,9 +261,10 @@ class TokenManager:
             "next_available_at",
         )
 
-        for model_name, payload in raw_results.items():
+        for raw_model_name, payload in raw_results.items():
             if not isinstance(payload, dict):
                 continue
+            model_name = self._normalize_model_id(raw_model_name) or raw_model_name
 
             remaining = payload.get("remainingQueries")
             if remaining is None:
@@ -295,6 +296,8 @@ class TokenManager:
     def _normalize_model_id(self, model_id: Optional[str]) -> Optional[str]:
         if not model_id:
             return None
+        if model_id == "grok420":
+            return "grok-420"
         model = ModelService.get(model_id)
         if model:
             return model.grok_model
@@ -807,14 +810,36 @@ class TokenManager:
                 is_token_expired = (
                     e.details.get("is_token_expired", False) if e.details else False
                 )
+                is_token_blocked = (
+                    e.details.get("is_token_blocked", False) if e.details else False
+                )
 
-                if status == 401:
+                if status in {401, 403}:
                     # 只要是 401，都应该记录一次失败，增加 fail_count
                     reason = (
                         "rate_limits_auth_failed"
                         if is_token_expired
-                        else "rate_limits_auth_unknown"
+                        else (
+                            "rate_limits_blocked_user"
+                            if is_token_blocked
+                            else "rate_limits_auth_unknown"
+                        )
                     )
+
+                    if is_token_blocked:
+                        target_token.status = TokenStatus.EXPIRED
+                        target_token.last_fail_reason = reason
+                        if target_pool_name:
+                            self._track_token_change(
+                                target_token,
+                                target_pool_name,
+                                "state",
+                            )
+                            self._schedule_save()
+                        logger.warning(
+                            f"Token {raw_token[:10]}...: API sync failed (blocked user), marking expired"
+                        )
+                        return False
 
                     # 如果确认为过期，传入 threshold=1 强制立即失效
                     await self.record_fail(
@@ -1282,6 +1307,18 @@ class TokenManager:
                         and isinstance(error.details, dict)
                         and error.details.get("is_token_expired", False)
                     )
+                    is_token_blocked = (
+                        isinstance(error, UpstreamException)
+                        and isinstance(error.details, dict)
+                        and error.details.get("is_token_blocked", False)
+                    )
+                    if is_token_blocked:
+                        logger.error(
+                            f"Token {token_info.token[:10]}...: blocked user after refresh, marking as expired"
+                        )
+                        token_info.status = TokenStatus.EXPIRED
+                        token_info.last_fail_reason = "rate_limits_blocked_user"
+                        return {"recovered": False, "expired": True}
                     if is_token_expired:
                         logger.error(
                             f"Token {token_info.token[:10]}...: confirmed expired after refresh, "
@@ -1292,6 +1329,24 @@ class TokenManager:
                     logger.warning(
                         f"Token {token_info.token[:10]}...: 401 during refresh but not confirmed expired, "
                         f"keeping current status"
+                    )
+                    return {"recovered": False, "expired": False}
+
+                if status == 403:
+                    is_token_blocked = (
+                        isinstance(error, UpstreamException)
+                        and isinstance(error.details, dict)
+                        and error.details.get("is_token_blocked", False)
+                    )
+                    if is_token_blocked:
+                        logger.error(
+                            f"Token {token_info.token[:10]}...: blocked user after refresh, marking as expired"
+                        )
+                        token_info.status = TokenStatus.EXPIRED
+                        token_info.last_fail_reason = "rate_limits_blocked_user"
+                        return {"recovered": False, "expired": True}
+                    logger.warning(
+                        f"Token {token_info.token[:10]}...: 403 during refresh but not confirmed blocked, keeping current status"
                     )
                     return {"recovered": False, "expired": False}
 
