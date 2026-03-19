@@ -113,6 +113,7 @@
     "sectionFallback": "{section} Settings",
     "sections": {
       "app": "App Settings",
+      "log": "Log Config",
       "proxy": "Proxy Config",
       "retry": "Retry Strategy",
       "chat": "Chat Config",
@@ -149,6 +150,7 @@
       "proxy": {
         "base_proxy_url": {"title": "Base Proxy URL", "desc": "Base service address for proxying requests to Grok website."},
         "asset_proxy_url": {"title": "Asset Proxy URL", "desc": "Address for proxying static resource (image/video) requests to Grok website."},
+        "cf_cookies": {"title": "Full CF Cookies", "desc": "Complete Cloudflare cookies string written by auto-refresh."},
         "skip_proxy_ssl_verify": {"title": "Skip Proxy SSL Verify", "desc": "Enable when your proxy uses a self-signed certificate (only bypasses proxy certificate validation)."},
         "enabled": {"title": "Enable CF Auto-Refresh", "desc": "When enabled, automatically obtains cf_clearance through FlareSolverr."},
         "flaresolverr_url": {"title": "FlareSolverr URL", "desc": "HTTP address of FlareSolverr service (e.g. http://flaresolverr:8191)."},
@@ -212,12 +214,24 @@
       },
       "token": {
         "auto_refresh": {"title": "Auto Refresh", "desc": "Whether to enable automatic Token refresh."},
-        "refresh_interval_hours": {"title": "Refresh Interval", "desc": "Time interval (hours) for regular Token refresh."},
+        "refresh_interval_hours": {"title": "Refresh Interval", "desc": "Fallback time interval (hours) for regular Token refresh."},
+        "refresh_interval_g3_hours": {"title": "Grok-3 Refresh Interval", "desc": "Refresh interval (hours) for the Grok-3 bucket."},
+        "refresh_interval_g4_hours": {"title": "Grok-4 Refresh Interval", "desc": "Refresh interval (hours) for the Grok-4 bucket."},
         "super_refresh_interval_hours": {"title": "Super Refresh Interval", "desc": "Time interval (hours) for Super Token refresh."},
         "fail_threshold": {"title": "Failure Threshold", "desc": "Number of consecutive failures before a Token is marked unavailable."},
         "save_delay_ms": {"title": "Save Delay", "desc": "Delay (ms) for batching Token change writes."},
         "usage_flush_interval_sec": {"title": "Usage Flush Interval", "desc": "Minimum interval (seconds) for writing usage data to database."},
-        "reload_interval_sec": {"title": "Sync Interval", "desc": "Token state refresh interval (seconds) in multi-worker scenarios."}
+        "reload_interval_sec": {"title": "Sync Interval", "desc": "Token state refresh interval (seconds) in multi-worker scenarios."},
+        "consumed_mode_enabled": {"title": "Enable Consumed Mode", "desc": "Use the new quota management logic based on local consumption records instead of direct API quota values for more balanced load distribution. Experimental and disabled by default."},
+        "on_demand_refresh_enabled": {"title": "On-Demand Refresh", "desc": "Allow a limited on-demand refresh when a request cannot find an available token."},
+        "on_demand_refresh_min_interval_sec": {"title": "On-Demand Refresh Min Interval", "desc": "Minimum interval (seconds) between request-side on-demand refreshes to avoid refresh storms."},
+        "on_demand_refresh_max_tokens": {"title": "On-Demand Refresh Max Tokens", "desc": "Maximum number of cooling tokens checked by a single request-side on-demand refresh."}
+      },
+      "log": {
+        "max_file_size_mb": {"title": "Max File Size", "desc": "Maximum size (MB) of a single log file before rotation. Set to 0 or below to disable size-based rotation."},
+        "max_files": {"title": "Max File Count", "desc": "Maximum number of log files to keep. Set to 0 or below for no limit."},
+        "log_all_requests": {"title": "Log All Requests", "desc": "When enabled, log every request. When disabled, only slow, exceptional, and error requests are logged."},
+        "request_slow_ms": {"title": "Slow Request Threshold", "desc": "Requests slower than this threshold (ms) are written to the log."}
       },
       "cache": {
         "enable_auto_clean": {"title": "Auto Clean", "desc": "Whether to enable automatic cache cleanup based on size limit."},
@@ -304,8 +318,12 @@
     "statGrok3Quota": "Grok-3 Remaining",
     "statGrok4Quota": "Grok-4 Remaining",
     "statGrok41Probe": "Grok-4.1 Probe",
+    "statGrok420Probe": "Grok-4.20 Probe",
     "statProbeHint": "Reference only",
     "statProbeQueries": "{count} queries",
+    "statMediaQuota": "Media Bucket",
+    "statMediaHint": "Upstream does not expose a separate bucket",
+    "statMediaUnavailable": "Unavailable",
     "statImageVideoHint": "= Grok-3 high bucket",
     "statImageEdit": "Image Edit",
     "statEditHint": "Independent upstream",

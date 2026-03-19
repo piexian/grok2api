@@ -164,10 +164,16 @@ class TokenInfo(BaseModel):
                 else None
             )
         if model_id == "grok-4-1-thinking-1129":
-            return int(self.grok41_queries) if self.grok41_queries is not None else None
+            return (
+                int(self.grok4_quota.remaining_tokens)
+                if self.grok4_quota is not None
+                else None
+            )
         if model_id == "grok-420":
             return (
-                int(self.grok420_queries) if self.grok420_queries is not None else None
+                int(self.grok4_quota.remaining_tokens)
+                if self.grok4_quota is not None
+                else None
             )
         if model_id in {
             "grok-imagine-1.0",
@@ -175,7 +181,7 @@ class TokenInfo(BaseModel):
             "grok-imagine-1.0-video",
         }:
             return (
-                int(self.grok3_quota.high_remaining)
+                int(self.grok3_quota.remaining_tokens)
                 if self.grok3_quota is not None
                 else None
             )

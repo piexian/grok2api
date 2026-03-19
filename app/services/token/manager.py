@@ -34,6 +34,7 @@ DEFAULT_ON_DEMAND_REFRESH_MIN_INTERVAL_SEC = 300
 DEFAULT_ON_DEMAND_REFRESH_MAX_TOKENS = 100
 DEFAULT_MODEL_RATE_LIMIT_COOLDOWN_SEC = 300
 SUPER_WINDOW_THRESHOLD_SECONDS = 14400
+PROBE_ONLY_MODEL_IDS = {"grok-4-1-thinking-1129", "grok-420", "grok420"}
 
 SUPER_POOL_NAME = "ssoSuper"
 BASIC_POOL_NAME = "ssoBasic"
@@ -265,6 +266,8 @@ class TokenManager:
             if not isinstance(payload, dict):
                 continue
             model_name = self._normalize_model_id(raw_model_name) or raw_model_name
+            if model_name in PROBE_ONLY_MODEL_IDS:
+                continue
 
             remaining = payload.get("remainingQueries")
             if remaining is None:
@@ -310,6 +313,35 @@ class TokenManager:
             return max(0, int(value))
         except (TypeError, ValueError):
             return None
+
+    def _get_basic_refresh_interval_hours(self) -> float:
+        fallback = get_config(
+            "token.refresh_interval_hours",
+            DEFAULT_REFRESH_INTERVAL_HOURS,
+        )
+        try:
+            fallback_hours = float(fallback)
+        except Exception:
+            fallback_hours = float(DEFAULT_REFRESH_INTERVAL_HOURS)
+
+        per_bucket: list[float] = []
+        for key in (
+            "token.refresh_interval_g3_hours",
+            "token.refresh_interval_g4_hours",
+        ):
+            value = get_config(key, None)
+            if value is None:
+                continue
+            try:
+                hours = float(value)
+            except Exception:
+                continue
+            if hours > 0:
+                per_bucket.append(hours)
+
+        if per_bucket:
+            return min(per_bucket)
+        return fallback_hours
 
     def _compute_effective_quota(
         self,
@@ -1191,10 +1223,7 @@ class TokenManager:
                     DEFAULT_SUPER_REFRESH_INTERVAL_HOURS,
                 )
             else:
-                interval_hours = get_config(
-                    "token.refresh_interval_hours",
-                    DEFAULT_REFRESH_INTERVAL_HOURS,
-                )
+                interval_hours = self._get_basic_refresh_interval_hours()
             for token in pool:
                 if token.need_refresh(interval_hours):
                     to_refresh.append((pool.name, token))

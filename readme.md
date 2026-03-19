@@ -435,7 +435,9 @@ curl http://localhost:8000/v1/videos \
 |  | `retry_backoff_max` | 退避上限 | 单次重试等待的最大延迟（秒）。 | `20.0` |
 |  | `retry_budget` | 退避预算 | 单次请求的最大重试总耗时（秒）。 | `60.0` |
 | **token** | `auto_refresh` | 自动刷新 | 是否开启 Token 自动刷新机制。 | `true` |
-|  | `refresh_interval_hours` | 刷新间隔 | 普通 Token 刷新的时间间隔（小时）。 | `8` |
+|  | `refresh_interval_hours` | 刷新间隔 | 普通 Token 刷新的兜底时间间隔（小时）。 | `8` |
+|  | `refresh_interval_g3_hours` | Grok-3 刷新间隔 | Grok-3 分桶的刷新时间间隔（小时）。 | `18` |
+|  | `refresh_interval_g4_hours` | Grok-4 刷新间隔 | Grok-4 分桶的刷新时间间隔（小时）。 | `8` |
 |  | `super_refresh_interval_hours` | Super 刷新间隔 | Super Token 刷新的时间间隔（小时）。 | `2` |
 |  | `fail_threshold` | 失败阈值 | 单个 Token 连续失败多少次后被标记为不可用。 | `5` |
 |  | `save_delay_ms` | 保存延迟 | Token 变更合并写入的延迟（毫秒）。 | `500` |

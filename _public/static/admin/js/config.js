@@ -9,6 +9,8 @@ const NUMERIC_FIELDS = new Set([
   'retry_backoff_max',
   'retry_budget',
   'refresh_interval_hours',
+  'refresh_interval_g3_hours',
+  'refresh_interval_g4_hours',
   'super_refresh_interval_hours',
   'fail_threshold',
   'limit_mb',
@@ -47,10 +49,6 @@ const LOCALE_MAP = {
     "app_key": { title: "后台密码", desc: "登录 Grok2API 管理后台的密码（必填）。" },
     "function_enabled": { title: "启用功能玩法", desc: "是否启用功能玩法入口（关闭则功能玩法页面不可访问）。" },
     "function_key": { title: "Function 密码", desc: "功能玩法页面的访问密码（可选）。" },
-    "consumed_mode_enabled": { title: "启用消耗模式", desc: "启用新额度管理逻辑：使用本地消耗记录而非 API 返回值，支持更均衡的负载分配。（试验性功能，默认关闭）" },
-    "on_demand_refresh_enabled": { title: "按需刷新", desc: "当请求拿不到可用 Token 时，是否允许触发受限的按需刷新。" },
-    "on_demand_refresh_min_interval_sec": { title: "按需刷新最小间隔", desc: "请求侧按需刷新之间的最小间隔（秒），用于避免刷新风暴。" },
-    "on_demand_refresh_max_tokens": { title: "按需刷新最大数量", desc: "单次请求侧按需刷新最多检查多少个 cooling Token。" }
   },
 
   "log": {
@@ -59,11 +57,13 @@ const LOCALE_MAP = {
     "max_files": { title: "保留文件数", desc: "最多保留多少个日志文件；设置为 0 或负数表示不限制数量。" },
     "log_all_requests": { title: "记录全部请求", desc: "开启后记录所有请求；关闭时仅记录慢请求、异常请求和错误请求。" },
     "request_slow_ms": { title: "慢请求阈值", desc: "请求耗时超过该值（毫秒）时会写入日志。" }
-},
+  },
+
   "proxy": {
     "label": "代理配置",
     "base_proxy_url": { title: "基础代理 URL", desc: "代理请求到 Grok 官网的基础服务地址。" },
     "asset_proxy_url": { title: "资源代理 URL", desc: "代理请求到 Grok 官网的静态资源（图片/视频）地址。" },
+    "cf_cookies": { title: "完整 CF Cookies", desc: "自动刷新写入的完整 Cloudflare Cookies 串。" },
     "skip_proxy_ssl_verify": { title: "跳过代理 SSL 校验", desc: "代理使用自签名证书时启用（仅放行代理证书校验）。" },
     "enabled": { title: "启用 CF 自动刷新", desc: "启用后将通过 FlareSolverr 自动获取 cf_clearance。" },
     "flaresolverr_url": { title: "FlareSolverr 地址", desc: "FlareSolverr 服务的 HTTP 地址（如 http://flaresolverr:8191）。" },
@@ -151,12 +151,18 @@ const LOCALE_MAP = {
   "token": {
     "label": "Token 池管理",
     "auto_refresh": { title: "自动刷新", desc: "是否开启 Token 自动刷新机制。" },
-    "refresh_interval_hours": { title: "刷新间隔", desc: "普通 Token 刷新的时间间隔（小时）。" },
+    "refresh_interval_hours": { title: "刷新间隔", desc: "普通 Token 刷新的兜底时间间隔（小时）。" },
+    "refresh_interval_g3_hours": { title: "Grok-3 刷新间隔", desc: "Grok-3 分桶的刷新时间间隔（小时）。" },
+    "refresh_interval_g4_hours": { title: "Grok-4 刷新间隔", desc: "Grok-4 分桶的刷新时间间隔（小时）。" },
     "super_refresh_interval_hours": { title: "Super 刷新间隔", desc: "Super Token 刷新的时间间隔（小时）。" },
     "fail_threshold": { title: "失败阈值", desc: "单个 Token 连续失败多少次后被标记为不可用。" },
     "save_delay_ms": { title: "保存延迟", desc: "Token 变更合并写入的延迟（毫秒）。" },
     "usage_flush_interval_sec": { title: "用量落库间隔", desc: "用量类字段写入数据库的最小间隔（秒）。" },
     "reload_interval_sec": { title: "同步间隔", desc: "多 worker 场景下 Token 状态刷新间隔（秒）。" },
+    "consumed_mode_enabled": { title: "启用消耗模式", desc: "启用新额度管理逻辑：使用本地消耗记录而非 API 返回值，支持更均衡的负载分配。（试验性功能，默认关闭）" },
+    "on_demand_refresh_enabled": { title: "按需刷新", desc: "当请求拿不到可用 Token 时，是否允许触发受限的按需刷新。" },
+    "on_demand_refresh_min_interval_sec": { title: "按需刷新最小间隔", desc: "请求侧按需刷新之间的最小间隔（秒），用于避免刷新风暴。" },
+    "on_demand_refresh_max_tokens": { title: "按需刷新最大数量", desc: "单次请求侧按需刷新最多检查多少个 cooling Token。" }
   },
 
 

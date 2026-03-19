@@ -197,6 +197,11 @@ function hasBucketQuotaData(item) {
   return !!(item && (item.grok3_quota || item.grok4_quota));
 }
 
+function formatProbeQueries(value) {
+  if (value == null) return '-';
+  return t('token.statProbeQueries', { count: Number(value || 0) });
+}
+
 function setBar(id, value, max, color) {
   const el = byId(id);
   if (!el) return;
@@ -240,16 +245,15 @@ function updateStats() {
   let noNsfwTokens = 0;
   let totalCalls = 0;
   let legacyChatQuota = 0;
-
   let grok3Total = 0;
   let grok3Remaining = 0;
-  let grok3HighRemaining = 0;
   let grok4Total = 0;
   let grok4Remaining = 0;
   let grok41Queries = 0;
   let grok420Queries = 0;
   let editCooldownCount = 0;
   let hasBucketData = false;
+  let hasProbeData = false;
 
   flatTokens.forEach(t => {
     if (t.status === 'active') {
@@ -260,7 +264,6 @@ function updateStats() {
         hasBucketData = true;
         grok3Total += Number(t.grok3_quota.total_tokens || 0);
         grok3Remaining += Number(t.grok3_quota.remaining_tokens || 0);
-        grok3HighRemaining += Number(t.grok3_quota.high_remaining || 0);
       }
       if (t.grok4_quota) {
         hasBucketData = true;
@@ -268,11 +271,11 @@ function updateStats() {
         grok4Remaining += Number(t.grok4_quota.remaining_tokens || 0);
       }
       if (t.grok41_queries != null) {
-        hasBucketData = true;
+        hasProbeData = true;
         grok41Queries += Number(t.grok41_queries || 0);
       }
       if (t.grok420_queries != null) {
-        hasBucketData = true;
+        hasProbeData = true;
         grok420Queries += Number(t.grok420_queries || 0);
       }
       const editCooldownUntil =
@@ -305,15 +308,7 @@ function updateStats() {
     setBar('stat-grok3-bar', grok3Remaining, grok3Total, '#10b981');
     setText('stat-grok4-quota', `${grok4Remaining} / ${grok4Total}`);
     setBar('stat-grok4-bar', grok4Remaining, grok4Total, '#3b82f6');
-    setText(
-      'stat-grok41-quota',
-      grok41Queries > 0
-        ? t('token.statProbeQueries', { count: grok41Queries })
-        : (grok420Queries > 0 ? t('token.statProbeQueries', { count: grok420Queries }) : '-')
-    );
-
-    setText('stat-image-quota', String(grok3HighRemaining));
-    setText('stat-video-quota', String(grok3HighRemaining));
+    setText('stat-video-quota', t('token.statMediaUnavailable'));
     const editAvailable = Math.max(0, activeTokens - editCooldownCount);
     setText(
       'stat-edit-quota',
@@ -326,11 +321,12 @@ function updateStats() {
     setBar('stat-grok3-bar', 0, 0, '#10b981');
     setText('stat-grok4-quota', '-');
     setBar('stat-grok4-bar', 0, 0, '#3b82f6');
-    setText('stat-grok41-quota', '-');
-    setText('stat-image-quota', legacyImageQuota.toLocaleString());
-    setText('stat-video-quota', t('token.statVideoUnavailable'));
+    setText('stat-video-quota', t('token.statMediaUnavailable'));
     setText('stat-edit-quota', '-');
   }
+
+  setText('stat-grok41-quota', hasProbeData ? formatProbeQueries(grok41Queries) : '-');
+  setText('stat-image-quota', hasProbeData ? formatProbeQueries(grok420Queries) : '-');
 
   setText('stat-total-calls', totalCalls.toLocaleString());
   updateStorageCard();

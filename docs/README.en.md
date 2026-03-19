@@ -434,7 +434,9 @@ Config file: `data/config.toml`
 |  | `retry_backoff_max` | Backoff max | Max delay per retry (seconds). | `20.0` |
 |  | `retry_budget` | Retry budget | Max total retry time (seconds). | `60.0` |
 | **token** | `auto_refresh` | Auto refresh | Enable token auto refresh. | `true` |
-|  | `refresh_interval_hours` | Refresh interval | Basic token refresh interval (hours). | `8` |
+|  | `refresh_interval_hours` | Refresh interval | Fallback basic token refresh interval (hours). | `8` |
+|  | `refresh_interval_g3_hours` | Grok-3 refresh interval | Grok-3 bucket refresh interval (hours). | `18` |
+|  | `refresh_interval_g4_hours` | Grok-4 refresh interval | Grok-4 bucket refresh interval (hours). | `8` |
 |  | `super_refresh_interval_hours` | Super refresh interval | Super token refresh interval (hours). | `2` |
 |  | `fail_threshold` | Fail threshold | Consecutive failures to disable. | `5` |
 |  | `save_delay_ms` | Save delay | Merge write delay (ms). | `500` |
