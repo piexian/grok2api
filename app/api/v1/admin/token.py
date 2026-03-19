@@ -140,6 +140,46 @@ async def update_tokens(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/tokens/delete", dependencies=[Depends(verify_app_key)])
+async def delete_tokens(data: dict):
+    """删除一个或多个 Token"""
+    try:
+        tokens = []
+        if isinstance(data.get("token"), str) and data["token"].strip():
+            tokens.append(_sanitize_token_text(data["token"]))
+        if isinstance(data.get("tokens"), list):
+            tokens.extend(
+                [
+                    _sanitize_token_text(t)
+                    for t in data["tokens"]
+                    if isinstance(t, str) and _sanitize_token_text(t)
+                ]
+            )
+
+        unique_tokens = [token for token in dict.fromkeys(tokens) if token]
+        if not unique_tokens:
+            raise HTTPException(status_code=400, detail="No tokens provided")
+
+        mgr = await get_token_manager()
+        results = {}
+        removed = 0
+        for token in unique_tokens:
+            ok = await mgr.remove(token)
+            results[token] = ok
+            if ok:
+                removed += 1
+
+        return {
+            "status": "success",
+            "removed": removed,
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/tokens/refresh", dependencies=[Depends(verify_app_key)])
 async def refresh_tokens(data: dict):
     """刷新 Token 状态"""

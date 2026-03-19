@@ -33,7 +33,7 @@ DEFAULT_USAGE_FLUSH_INTERVAL_SEC = 5
 DEFAULT_ON_DEMAND_REFRESH_MIN_INTERVAL_SEC = 300
 DEFAULT_ON_DEMAND_REFRESH_MAX_TOKENS = 100
 DEFAULT_MODEL_RATE_LIMIT_COOLDOWN_SEC = 300
-SUPER_WINDOW_THRESHOLD_SECONDS = 14400
+POOL_WINDOW_THRESHOLD_SECONDS = 3 * 3600
 PROBE_ONLY_MODEL_IDS = {"grok-4-1-thinking-1129", "grok-420", "grok420"}
 
 SUPER_POOL_NAME = "ssoSuper"
@@ -343,6 +343,29 @@ class TokenManager:
             return min(per_bucket)
         return fallback_hours
 
+    def _move_token_pool(
+        self,
+        token: TokenInfo,
+        from_pool: str,
+        to_pool: str,
+        reason: str = "",
+    ) -> str:
+        if from_pool == to_pool:
+            return from_pool
+        if to_pool not in self.pools:
+            self.pools[to_pool] = TokenPool(to_pool)
+            logger.info(f"Pool '{to_pool}': created")
+        if from_pool in self.pools:
+            self.pools[from_pool].remove(token.token)
+        self.pools[to_pool].add(token)
+        self._track_token_change(token, to_pool, "state")
+        self._schedule_save()
+        extra = f" ({reason})" if reason else ""
+        logger.warning(
+            f"Token {token.token[:10]}... moved pool {from_pool} -> {to_pool}{extra}"
+        )
+        return to_pool
+
     def _compute_effective_quota(
         self,
         grok3_quota,
@@ -437,54 +460,31 @@ class TokenManager:
         token.record_success(is_usage=is_usage)
         token.mark_synced()
 
-        grok3_raw = raw_data.get("grok-3") or result
+        grok3_raw = raw_data.get("grok-3") or {}
         window_size = self._extract_window_size_seconds(grok3_raw)
         if window_size is not None and pool_name:
             if (
                 pool_name == SUPER_POOL_NAME
-                and window_size >= SUPER_WINDOW_THRESHOLD_SECONDS
+                and window_size > POOL_WINDOW_THRESHOLD_SECONDS
             ):
                 pool_name = self._move_token_pool(
                     token,
                     SUPER_POOL_NAME,
                     BASIC_POOL_NAME,
-                    reason=f"windowSizeSeconds={window_size}",
+                    reason=f"grok-3 windowSizeSeconds={window_size}",
                 )
             elif (
                 pool_name == BASIC_POOL_NAME
-                and window_size < SUPER_WINDOW_THRESHOLD_SECONDS
+                and window_size <= POOL_WINDOW_THRESHOLD_SECONDS
             ):
                 pool_name = self._move_token_pool(
                     token,
                     BASIC_POOL_NAME,
                     SUPER_POOL_NAME,
-                    reason=f"windowSizeSeconds={window_size}",
+                    reason=f"grok-3 windowSizeSeconds={window_size}",
                 )
 
         return pool_name, old_quota, int(new_quota), old_status
-
-    def _move_token_pool(
-        self,
-        token: TokenInfo,
-        from_pool: str,
-        to_pool: str,
-        reason: str = "",
-    ) -> str:
-        if from_pool == to_pool:
-            return from_pool
-        if to_pool not in self.pools:
-            self.pools[to_pool] = TokenPool(to_pool)
-            logger.info(f"Pool '{to_pool}': created")
-        if from_pool in self.pools:
-            self.pools[from_pool].remove(token.token)
-        self.pools[to_pool].add(token)
-        self._track_token_change(token, to_pool, "state")
-        self._schedule_save()
-        extra = f" ({reason})" if reason else ""
-        logger.warning(
-            f"Token {token.token[:10]}... moved pool {from_pool} -> {to_pool}{extra}"
-        )
-        return to_pool
 
     async def _save(self, force: bool = False):
         """保存变更"""
@@ -1131,9 +1131,10 @@ class TokenManager:
         Returns:
             是否成功
         """
+        raw_token = token[4:] if token.startswith("sso=") else token
         for pool_name, pool in self.pools.items():
-            if pool.remove(token):
-                self._track_token_delete(token)
+            if pool.remove(raw_token):
+                self._track_token_delete(raw_token)
                 await self._save(force=True)
                 logger.info(f"Pool '{pool_name}': token removed")
                 return True

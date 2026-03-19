@@ -787,10 +787,26 @@ async function saveEdit() {
 }
 
 async function deleteToken(index) {
+  const item = flatTokens[index];
+  if (!item) return;
   const ok = await confirmAction(t('token.confirmDelete'), { okText: t('common.delete') });
   if (!ok) return;
-  flatTokens.splice(index, 1);
-  syncToServer().then(loadData);
+  try {
+    const res = await fetch('/v1/admin/tokens/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(apiKey)
+      },
+      body: JSON.stringify({ token: item.token })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    flatTokens.splice(index, 1);
+    await loadData();
+    showToast(t('common.deleteSuccess'), 'success');
+  } catch (e) {
+    showToast(t('common.deleteFailed'), 'error');
+  }
 }
 
 async function toggleTokenEnabled(index) {
@@ -1197,9 +1213,18 @@ async function startBatchDelete() {
   setActionButtonsState();
 
   try {
+    const res = await fetch('/v1/admin/tokens/delete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(apiKey)
+      },
+      body: JSON.stringify({ tokens: batchQueue })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const toRemove = new Set(batchQueue);
     flatTokens = flatTokens.filter(t => !toRemove.has(t.token));
-    await syncToServer();
+    await loadData();
     batchProcessed = batchTotal;
     updateBatchProgress();
     finishBatchProcess(false, { silent: true });
