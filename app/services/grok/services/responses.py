@@ -10,6 +10,7 @@ import orjson
 
 from app.services.grok.services.chat import ChatService
 from app.services.grok.utils import process as proc_base
+from app.services.grok.utils.usage import to_responses_usage
 
 
 _TOOL_OUTPUT_TYPES = {
@@ -55,7 +56,9 @@ def _normalize_tool_choice(tool_choice: Any) -> Any:
     return tool_choice
 
 
-def _normalize_tools_for_chat(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+def _normalize_tools_for_chat(
+    tools: Optional[List[Dict[str, Any]]],
+) -> Optional[List[Dict[str, Any]]]:
     if not tools:
         return None
     normalized: List[Dict[str, Any]] = []
@@ -137,11 +140,23 @@ def normalize_input_item(item: Any) -> Optional[Dict[str, Any]]:
 
     if item_type == "message":
         role = item.get("role") or "user"
-        return {"kind": "message", "message": {"role": role, "content": _normalize_content(item.get("content"))}}
+        return {
+            "kind": "message",
+            "message": {
+                "role": role,
+                "content": _normalize_content(item.get("content")),
+            },
+        }
 
     if "role" in item and "content" in item:
         role = item.get("role") or "user"
-        return {"kind": "message", "message": {"role": role, "content": _normalize_content(item.get("content"))}}
+        return {
+            "kind": "message",
+            "message": {
+                "role": role,
+                "content": _normalize_content(item.get("content")),
+            },
+        }
 
     if item_type in _TOOL_OUTPUT_TYPES:
         call_id = (
@@ -151,7 +166,10 @@ def normalize_input_item(item: Any) -> Optional[Dict[str, Any]]:
             or _new_tool_call_id()
         )
         output = item.get("output") or item.get("content") or ""
-        return {"kind": "tool", "message": {"role": "tool", "tool_call_id": call_id, "content": output}}
+        return {
+            "kind": "tool",
+            "message": {"role": "tool", "tool_call_id": call_id, "content": output},
+        }
 
     if item_type in {"input_text", "text", "output_text"}:
         text = item.get("text") or item.get("content") or ""
@@ -174,7 +192,10 @@ def normalize_input_item(item: Any) -> Optional[Dict[str, Any]]:
         image_payload = {"url": url}
         if detail:
             image_payload["detail"] = detail
-        return {"kind": "block", "block": {"type": "image_url", "image_url": image_payload}}
+        return {
+            "kind": "block",
+            "block": {"type": "image_url", "image_url": image_payload},
+        }
 
     if item_type in {"input_file", "file"}:
         file_data = item.get("file_data")
@@ -196,7 +217,10 @@ def normalize_input_item(item: Any) -> Optional[Dict[str, Any]]:
         data = audio.get("data") or item.get("data")
         if not data:
             return None
-        return {"kind": "block", "block": {"type": "input_audio", "input_audio": {"data": data}}}
+        return {
+            "kind": "block",
+            "block": {"type": "input_audio", "input_audio": {"data": data}},
+        }
 
     return None
 
@@ -352,7 +376,9 @@ def _build_response_object(
         "max_output_tokens": max_output_tokens,
         "model": model,
         "output": output,
-        "parallel_tool_calls": True if parallel_tool_calls is None else parallel_tool_calls,
+        "parallel_tool_calls": True
+        if parallel_tool_calls is None
+        else parallel_tool_calls,
         "previous_response_id": previous_response_id,
         "reasoning": {"effort": reasoning_effort, "summary": None},
         "store": True if store is None else store,
@@ -418,7 +444,13 @@ class ResponseStreamAdapter:
     def _event(self, event_type: str, payload: Dict[str, Any]) -> str:
         return f"event: {event_type}\ndata: {orjson.dumps(payload).decode()}\n\n"
 
-    def _response_payload(self, *, status: str, output_text: Optional[str], usage: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _response_payload(
+        self,
+        *,
+        status: str,
+        output_text: Optional[str],
+        usage: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         tool_calls = None
         if status == "completed" and self.tool_calls_by_index:
             tool_calls = [
@@ -456,14 +488,18 @@ class ResponseStreamAdapter:
     def created_event(self) -> str:
         payload = {
             "type": "response.created",
-            "response": self._response_payload(status="in_progress", output_text=None, usage=None),
+            "response": self._response_payload(
+                status="in_progress", output_text=None, usage=None
+            ),
         }
         return self._event("response.created", payload)
 
     def in_progress_event(self) -> str:
         payload = {
             "type": "response.in_progress",
-            "response": self._response_payload(status="in_progress", output_text=None, usage=None),
+            "response": self._response_payload(
+                status="in_progress", output_text=None, usage=None
+            ),
         }
         return self._event("response.in_progress", payload)
 
@@ -472,7 +508,9 @@ class ResponseStreamAdapter:
             return []
         self.message_started = True
         self.message_output_index = self._alloc_output_index()
-        item = _build_output_message("", message_id=self.message_id, status="in_progress")
+        item = _build_output_message(
+            "", message_id=self.message_id, status="in_progress"
+        )
         item["content"] = []
         events = [
             self._event(
@@ -550,7 +588,9 @@ class ResponseStreamAdapter:
             ),
         ]
 
-    def ensure_tool_item(self, tool_index: int, call_id: str, name: Optional[str]) -> List[str]:
+    def ensure_tool_item(
+        self, tool_index: int, call_id: str, name: Optional[str]
+    ) -> List[str]:
         if tool_index in self.tool_items:
             item = self.tool_items[tool_index]
             if name and not item.get("name"):
@@ -620,7 +660,10 @@ class ResponseStreamAdapter:
             tool_item = _build_output_tool_call(
                 {
                     "id": item["call_id"],
-                    "function": {"name": item.get("name"), "arguments": item["arguments"]},
+                    "function": {
+                        "name": item.get("name"),
+                        "arguments": item["arguments"],
+                    },
                 },
                 item_id=item["item_id"],
                 status="completed",
@@ -638,7 +681,9 @@ class ResponseStreamAdapter:
             )
         return events
 
-    def record_tool_call(self, tool_index: int, call_id: str, name: Optional[str], arguments_delta: str) -> None:
+    def record_tool_call(
+        self, tool_index: int, call_id: str, name: Optional[str], arguments_delta: str
+    ) -> None:
         tool_call = self.tool_calls_by_index.get(tool_index)
         if not tool_call:
             tool_call = {
@@ -655,9 +700,10 @@ class ResponseStreamAdapter:
     def completed_event(self, usage: Optional[Dict[str, Any]] = None) -> str:
         response = self._response_payload(
             status="completed",
-            output_text="".join(self.output_text_parts) if self.message_started else None,
-            usage=usage
-            or {"total_tokens": 0, "input_tokens": 0, "output_tokens": 0},
+            output_text="".join(self.output_text_parts)
+            if self.message_started
+            else None,
+            usage=usage or {"total_tokens": 0, "input_tokens": 0, "output_tokens": 0},
         )
         payload = {"type": "response.completed", "response": response}
         return self._event("response.completed", payload)
@@ -725,8 +771,7 @@ class ResponsesService:
                 model=model,
                 output_text=content,
                 tool_calls=tool_calls,
-                usage=result.get("usage")
-                or {"total_tokens": 0, "input_tokens": 0, "output_tokens": 0},
+                usage=to_responses_usage(result.get("usage")),
                 status="completed",
                 instructions=instructions,
                 max_output_tokens=max_output_tokens,
@@ -768,6 +813,7 @@ class ResponsesService:
         )
 
         async def _stream() -> AsyncGenerator[str, None]:
+            final_usage: Optional[Dict[str, Any]] = None
             yield adapter.created_event()
             yield adapter.in_progress_event()
             async for chunk in result:
@@ -780,6 +826,8 @@ class ResponsesService:
                     continue
 
                 if data.get("object") == "chat.completion.chunk":
+                    if data.get("usage"):
+                        final_usage = to_responses_usage(data.get("usage"))
                     delta = (data.get("choices") or [{}])[0].get("delta") or {}
                     if "content" in delta and delta["content"]:
                         for event in adapter.ensure_message_started():
@@ -815,7 +863,7 @@ class ResponsesService:
                     yield event
             for event in adapter.tool_arguments_done_events():
                 yield event
-            yield adapter.completed_event()
+            yield adapter.completed_event(final_usage)
 
         return _stream()
 

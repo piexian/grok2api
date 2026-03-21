@@ -43,7 +43,10 @@ from app.services.token.manager import BASIC_POOL_NAME
 _VIDEO_SEMAPHORE = None
 _VIDEO_SEM_VALUE = 0
 _APP_CHAT_MODEL = "grok-3"
+_CONTINUATION_MODE = "MODEL_MODE_FAST"
+_CONTINUATION_MAX_WORDS = 20
 _POST_ID_URL_PATTERN = r"/generated/([0-9a-fA-F-]{32,36})/"
+_REFERENCE_PLACEHOLDER_RE = re.compile(r"@(?:(?:图|image|img)\s*(\d+))", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -237,14 +240,20 @@ def _build_round_config(
     prompt: str,
     aspect_ratio: str,
     resolution_name: str,
+    image_references: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     if not plan.is_extension:
-        return _build_base_config(
+        config = _build_base_config(
             seed_post_id,
             aspect_ratio,
             resolution_name,
             plan.video_length,
         )
+        if image_references:
+            video_config = config["modelMap"]["videoGenModelConfig"]
+            video_config["imageReferences"] = image_references
+            video_config["isReferenceToVideo"] = True
+        return config
 
     if not original_post_id:
         raise UpstreamException(
@@ -563,11 +572,129 @@ def _new_session() -> ResettableSession:
     return ResettableSession()
 
 
+def _normalize_continuation_prompt(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    normalized = normalized.strip("`'\" ")
+    normalized = re.sub(
+        r"^(continuation prompt|prompt)\s*:\s*",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not normalized:
+        return ""
+    words = normalized.split()
+    if len(words) > _CONTINUATION_MAX_WORDS:
+        normalized = " ".join(words[:_CONTINUATION_MAX_WORDS])
+    return normalized
+
+
+def _replace_reference_placeholders(prompt: str, asset_ids: List[str]) -> str:
+    if not isinstance(prompt, str) or not prompt:
+        return prompt
+
+    def _replace(match: re.Match[str]) -> str:
+        ref_index = int(match.group(1)) - 1
+        if ref_index < 0 or ref_index >= len(asset_ids):
+            raise ValidationException(
+                f"Reference placeholder {match.group(0)} has no matching uploaded image"
+            )
+        return f"@{asset_ids[ref_index]}"
+
+    return _REFERENCE_PLACEHOLDER_RE.sub(_replace, prompt)
+
+
+def _strip_reference_placeholders(prompt: str) -> str:
+    if not isinstance(prompt, str) or not prompt:
+        return prompt
+    stripped = _REFERENCE_PLACEHOLDER_RE.sub("", prompt)
+    stripped = re.sub(r"\s+", " ", stripped)
+    stripped = re.sub(r"\s+([,.;:!?])", r"\1", stripped)
+    return stripped.strip()
+
+
+async def _generate_continuation_prompt(
+    original_prompt: str,
+    round_index: int,
+    token: str,
+) -> str:
+    base_prompt = _normalize_continuation_prompt(original_prompt)
+    if not base_prompt or round_index <= 1:
+        return base_prompt or original_prompt
+
+    request_message = (
+        "You are continuing a generated video.\n"
+        f"Original prompt: {base_prompt}\n"
+        f"Extension round: {round_index}\n"
+        "Write one short continuation prompt that keeps the same subjects and style, "
+        "adds new motion or scene progression, and avoids repeating the original action.\n"
+        "Return only the prompt text, max 20 words."
+    )
+
+    session = _new_session()
+    collected_tokens: list[str] = []
+    final_message = ""
+    try:
+        async with _get_video_semaphore():
+            stream_response = await AppChatReverse.request(
+                session,
+                token,
+                message=request_message,
+                model=_APP_CHAT_MODEL,
+                mode=_CONTINUATION_MODE,
+            )
+            async for raw_line in stream_response:
+                line = _normalize_line(raw_line)
+                if not line:
+                    continue
+                try:
+                    payload = orjson.loads(line)
+                except orjson.JSONDecodeError:
+                    continue
+
+                root = payload.get("result") if isinstance(payload, dict) else None
+                resp = root.get("response") if isinstance(root, dict) else None
+                if not isinstance(resp, dict):
+                    continue
+
+                token_chunk = resp.get("token")
+                if isinstance(token_chunk, str) and token_chunk:
+                    collected_tokens.append(token_chunk)
+
+                model_resp = resp.get("modelResponse")
+                if isinstance(model_resp, dict):
+                    message = _pick_str(model_resp.get("message"))
+                    if message:
+                        final_message = message
+    except Exception as e:
+        logger.warning(
+            f"Video continuation prompt generation failed (round {round_index}): {e}"
+        )
+        return base_prompt or original_prompt
+    finally:
+        try:
+            await session.close()
+        except Exception:
+            pass
+
+    continuation = _normalize_continuation_prompt(
+        final_message or "".join(collected_tokens)
+    )
+    if continuation:
+        logger.info(f"Video continuation prompt (round {round_index}): {continuation}")
+        return continuation
+
+    return base_prompt or original_prompt
+
+
 async def _request_round_stream(
     *,
     token: str,
     message: str,
     model_config_override: Dict[str, Any],
+    file_attachments: Optional[List[str]] = None,
 ) -> AsyncGenerator[bytes, None]:
     async def _stream():
         session = _new_session()
@@ -578,6 +705,7 @@ async def _request_round_stream(
                     token,
                     message=message,
                     model=_APP_CHAT_MODEL,
+                    file_attachments=file_attachments,
                     tool_overrides={"videoGen": True},
                     model_config_override=model_config_override,
                 )
@@ -830,6 +958,8 @@ class VideoService:
         from app.services.grok.utils.upload import UploadService
 
         prompt, _, image_attachments = MessageExtractor.extract(messages)
+        prompt = prompt or ""
+        uses_reference_placeholders = bool(_REFERENCE_PLACEHOLDER_RE.search(prompt))
 
         pool_candidates = ModelService.pool_candidates_for_model(model)
         token_info = token_mgr.get_token_for_video(
@@ -862,24 +992,52 @@ class VideoService:
         round_plan = _build_round_plan(target_length, is_super=is_super_pool)
 
         service = VideoService()
-        message = _build_message(prompt, preset)
 
         image_url = None
+        image_urls: List[str] = []
+        asset_ids: List[str] = []
+        use_multi_reference_path = False
+        first_round_prompt = prompt
+        continuation_prompt_source = prompt
         if image_attachments:
+            if len(image_attachments) > 7:
+                raise ValidationException(
+                    "Video generation supports at most 7 reference images"
+                )
             upload_service = UploadService()
             try:
-                if len(image_attachments) > 1:
-                    logger.info(
-                        "Video generation supports a single reference image; using the first one."
+                use_multi_reference_path = (
+                    len(image_attachments) > 1 or uses_reference_placeholders
+                )
+                if use_multi_reference_path:
+                    for attach_data in image_attachments:
+                        asset_id, file_uri = await upload_service.upload_file(
+                            attach_data, token
+                        )
+                        asset_ids.append(asset_id)
+                        image_urls.append(f"https://assets.grok.com/{file_uri}")
+                    first_round_prompt = _replace_reference_placeholders(
+                        prompt, asset_ids
                     )
-                attach_data = image_attachments[0]
-                _, file_uri = await upload_service.upload_file(attach_data, token)
-                image_url = f"https://assets.grok.com/{file_uri}"
-                logger.info(f"Image uploaded for video: {image_url}")
+                    continuation_prompt_source = (
+                        _strip_reference_placeholders(prompt) or prompt
+                    )
+                    logger.info(
+                        f"Images uploaded for video generation: count={len(image_urls)}"
+                    )
+                else:
+                    attach_data = image_attachments[0]
+                    _, file_uri = await upload_service.upload_file(attach_data, token)
+                    image_url = f"https://assets.grok.com/{file_uri}"
+                    logger.info(f"Image uploaded for video: {image_url}")
             finally:
                 await upload_service.close()
+        elif uses_reference_placeholders:
+            raise ValidationException("Reference placeholders require uploaded images")
 
-        if image_url:
+        if use_multi_reference_path:
+            seed_post_id = await service.create_post(token, first_round_prompt)
+        elif image_url:
             seed_post_id = await service.create_image_post(token, image_url)
         else:
             seed_post_id = await service.create_post(token, prompt)
@@ -898,20 +1056,25 @@ class VideoService:
             last_id: str,
             original_id: Optional[str],
             source: str,
+            round_prompt: Optional[str] = None,
         ) -> VideoRoundResult:
+            current_prompt = round_prompt if round_prompt is not None else prompt
+            first_round = plan.round_index == 1
             config_override = _build_round_config(
                 plan,
                 seed_post_id=seed_id,
                 last_post_id=last_id,
                 original_post_id=original_id,
-                prompt=prompt,
+                prompt=current_prompt,
                 aspect_ratio=aspect_ratio,
                 resolution_name=generation_resolution,
+                image_references=image_urls if first_round and image_urls else None,
             )
             response = await _request_round_stream(
                 token=token,
-                message=message,
+                message=_build_message(current_prompt, preset),
                 model_config_override=config_override,
+                file_attachments=asset_ids if first_round and asset_ids else None,
             )
             return await _collect_round_result(response, model=model, source=source)
 
@@ -924,19 +1087,32 @@ class VideoService:
 
             try:
                 for plan in round_plan:
+                    round_prompt = (
+                        first_round_prompt if plan.round_index == 1 else prompt
+                    )
+                    if plan.is_extension:
+                        round_prompt = await _generate_continuation_prompt(
+                            continuation_prompt_source, plan.round_index, token
+                        )
                     config_override = _build_round_config(
                         plan,
                         seed_post_id=seed_id,
                         last_post_id=last_id,
                         original_post_id=original_id,
-                        prompt=prompt,
+                        prompt=round_prompt,
                         aspect_ratio=aspect_ratio,
                         resolution_name=generation_resolution,
+                        image_references=(
+                            image_urls if plan.round_index == 1 and image_urls else None
+                        ),
                     )
                     response = await _request_round_stream(
                         token=token,
-                        message=message,
+                        message=_build_message(round_prompt, preset),
                         model_config_override=config_override,
+                        file_attachments=(
+                            asset_ids if plan.round_index == 1 and asset_ids else None
+                        ),
                     )
 
                     round_result = VideoRoundResult()
@@ -1048,12 +1224,18 @@ class VideoService:
             final_result: Optional[VideoRoundResult] = None
 
             for plan in round_plan:
+                round_prompt = first_round_prompt if plan.round_index == 1 else prompt
+                if plan.is_extension:
+                    round_prompt = await _generate_continuation_prompt(
+                        continuation_prompt_source, plan.round_index, token
+                    )
                 round_result = await _run_round_collect(
                     plan,
                     seed_id=seed_id,
                     last_id=last_id,
                     original_id=original_id,
                     source=f"collect-round-{plan.round_index}",
+                    round_prompt=round_prompt,
                 )
 
                 _ensure_round_result(

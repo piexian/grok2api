@@ -78,6 +78,7 @@ class AppChatReverse:
         file_attachments: List[str] = None,
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
+        request_overrides: Dict[str, Any] = None,
     ) -> Dict[str, Any]:
         """Build chat payload for Grok app-chat API."""
 
@@ -129,6 +130,11 @@ class AppChatReverse:
         if model_config_override:
             payload["responseMetadata"]["modelConfigOverride"] = model_config_override
 
+        if request_overrides:
+            payload.update(
+                {k: v for k, v in request_overrides.items() if v is not None}
+            )
+
         import json
 
         logger.debug(
@@ -147,6 +153,7 @@ class AppChatReverse:
         file_attachments: List[str] = None,
         tool_overrides: Dict[str, Any] = None,
         model_config_override: Dict[str, Any] = None,
+        request_overrides: Dict[str, Any] = None,
     ) -> Any:
         """Send app chat request to Grok.
 
@@ -180,6 +187,7 @@ class AppChatReverse:
                 file_attachments=file_attachments,
                 tool_overrides=tool_overrides,
                 model_config_override=model_config_override,
+                request_overrides=request_overrides,
             )
             payload_summary = {
                 "model": payload.get("modelName"),

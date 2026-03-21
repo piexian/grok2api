@@ -46,6 +46,18 @@ def _default_quota_for_pool(pool_name: str) -> int:
     return BASIC__DEFAULT_QUOTA
 
 
+def _contains_email_domain_rejected(value: object) -> bool:
+    if value is None:
+        return False
+
+    if isinstance(value, UpstreamException) and isinstance(value.details, dict):
+        body = value.details.get("body")
+        if body and "email-domain-rejected" in str(body).lower():
+            return True
+
+    return "email-domain-rejected" in str(value).lower()
+
+
 class TokenManager:
     """管理 Token 的增删改查和配额同步"""
 
@@ -924,9 +936,18 @@ class TokenManager:
         """
         raw_token = token_str.replace("sso=", "")
 
-        for pool in self.pools.values():
+        for pool_name, pool in self.pools.items():
             token = pool.get(raw_token)
             if token:
+                if status_code == 400 and _contains_email_domain_rejected(reason):
+                    pool.remove(raw_token)
+                    self._track_token_delete(raw_token)
+                    await self._save(force=True)
+                    logger.warning(
+                        f"Token {raw_token[:10]}...: email-domain-rejected, removed from pool '{pool_name}'"
+                    )
+                    return True
+
                 if status_code == 401:
                     if threshold is None:
                         threshold = get_config("token.fail_threshold", FAIL_THRESHOLD)
@@ -949,7 +970,7 @@ class TokenManager:
                         f"Token {raw_token[:10]}...: recorded {status_code} failure "
                         f"({token.fail_count}/{threshold}) - {reason} - status: {token.status}"
                     )
-                    self._track_token_change(token, pool.name, "state")
+                    self._track_token_change(token, pool_name, "state")
                     self._schedule_save()
                 else:
                     logger.info(
@@ -1331,6 +1352,16 @@ class TokenManager:
                             "expired": False,
                         }
 
+                if status == 400 and _contains_email_domain_rejected(error):
+                    logger.warning(
+                        f"Token {token_info.token[:10]}...: email-domain-rejected (400), removing from pool"
+                    )
+                    current_pool = self.get_pool_name_for_token(token_info.token)
+                    if current_pool and current_pool in self.pools:
+                        self.pools[current_pool].remove(token_info.token)
+                        self._track_token_delete(token_info.token)
+                    return {"recovered": False, "expired": True}
+
                 if status == 401:
                     is_token_expired = (
                         isinstance(error, UpstreamException)
@@ -1400,7 +1431,12 @@ class TokenManager:
                 await asyncio.sleep(1)
 
         for pool_name, token_info in to_refresh:
-            current_pool = self.get_pool_name_for_token(token_info.token) or pool_name
+            current_pool = self.get_pool_name_for_token(token_info.token)
+            if not current_pool:
+                continue
+            pool = self.pools.get(current_pool)
+            if not pool or not pool.get(token_info.token):
+                continue
             self._track_token_change(token_info, current_pool, "state")
         await self._save(force=True)
 

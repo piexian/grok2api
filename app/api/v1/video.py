@@ -46,8 +46,12 @@ class VideoCreateRequest(BaseModel):
     size: Optional[str] = Field("1792x1024", description="Output size")
     seconds: Optional[int] = Field(6, description="Video length in seconds")
     quality: Optional[str] = Field("standard", description="Quality: standard/high")
-    image_reference: Optional[Any] = Field(None, description="Structured image reference")
-    input_reference: Optional[Any] = Field(None, description="Multipart input reference file")
+    image_reference: Optional[Any] = Field(
+        None, description="Structured image reference"
+    )
+    input_reference: Optional[Any] = Field(
+        None, description="Multipart input reference file"
+    )
 
 
 class VideoExtendDirectRequest(BaseModel):
@@ -57,7 +61,8 @@ class VideoExtendDirectRequest(BaseModel):
 
     prompt: str = Field(..., description="Prompt text mapped to message/originalPrompt")
     reference_id: str = Field(
-        ..., description="Reference id mapped to extendPostId/originalPostId/parentPostId"
+        ...,
+        description="Reference id mapped to extendPostId/originalPostId/parentPostId",
     )
     start_time: float = Field(..., description="Mapped to videoExtensionStartTime")
     ratio: str = Field("2:3", description="Mapped to aspectRatio")
@@ -72,7 +77,9 @@ def _raise_validation_error(exc: ValidationError) -> None:
         loc = first.get("loc", [])
         msg = first.get("msg", "Invalid request")
         code = first.get("type", "invalid_value")
-        param_parts = [str(x) for x in loc if not (isinstance(x, int) or str(x).isdigit())]
+        param_parts = [
+            str(x) for x in loc if not (isinstance(x, int) or str(x).isdigit())
+        ]
         param = ".".join(param_parts) if param_parts else None
         raise ValidationException(message=msg, param=param, code=code)
     raise ValidationException(message="Invalid request", code="invalid_value")
@@ -165,32 +172,50 @@ def _validate_reference_value(value: str, param: str) -> str:
     )
 
 
-def _parse_image_reference(value: Any) -> Optional[str]:
-    if value is None or value == "":
-        return None
-
+def _parse_image_reference_item(value: Any, param: str) -> str:
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
-            return None
-        if stripped[0] in {"{", "["}:
-            try:
-                value = orjson.loads(stripped)
-            except orjson.JSONDecodeError:
-                # allow plain url/data-uri in multipart text field as a practical fallback
-                return _validate_reference_value(stripped, "image_reference")
-        else:
-            return _validate_reference_value(stripped, "image_reference")
+            raise ValidationException(
+                message=f"{param} cannot be empty",
+                param=param,
+                code="invalid_reference",
+            )
+        return _validate_reference_value(stripped, param)
 
     if not isinstance(value, dict):
         raise ValidationException(
             message=(
-                "image_reference must be an object with exactly one of "
-                "`image_url` or `file_id`"
+                f"{param} must be a URL string, a legacy image_reference object, "
+                'or a content block like {"type":"image_url","image_url":{"url":"..."}}'
             ),
-            param="image_reference",
+            param=param,
             code="invalid_reference",
         )
+
+    block_type = value.get("type")
+    if block_type is not None:
+        if block_type != "image_url":
+            raise ValidationException(
+                message=f'{param} must have type="image_url"',
+                param=f"{param}.type",
+                code="invalid_reference",
+            )
+        inner = value.get("image_url")
+        if not isinstance(inner, dict):
+            raise ValidationException(
+                message=f"{param}.image_url must be an object with a url field",
+                param=f"{param}.image_url",
+                code="invalid_reference",
+            )
+        url = inner.get("url", "")
+        if not isinstance(url, str) or not url.strip():
+            raise ValidationException(
+                message=f"{param}.image_url.url cannot be empty",
+                param=f"{param}.image_url.url",
+                code="invalid_reference",
+            )
+        return _validate_reference_value(url.strip(), f"{param}.image_url.url")
 
     image_url = value.get("image_url")
     file_id = value.get("file_id")
@@ -202,7 +227,7 @@ def _parse_image_reference(value: Any) -> Optional[str]:
     if has_image_url == has_file_id:
         raise ValidationException(
             message="image_reference requires exactly one of image_url or file_id",
-            param="image_reference",
+            param=param,
             code="invalid_reference",
         )
 
@@ -212,11 +237,36 @@ def _parse_image_reference(value: Any) -> Optional[str]:
                 "image_reference.file_id is not supported in current reverse pipeline; "
                 "please use image_reference.image_url or multipart input_reference"
             ),
-            param="image_reference.file_id",
+            param=f"{param}.file_id",
             code="unsupported_reference",
         )
 
-    return _validate_reference_value(image_url, "image_reference.image_url")
+    return _validate_reference_value(image_url, f"{param}.image_url")
+
+
+def _parse_image_references(value: Any) -> List[str]:
+    if value is None or value == "":
+        return []
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        if stripped[0] in {"{", "["}:
+            try:
+                value = orjson.loads(stripped)
+            except orjson.JSONDecodeError:
+                return [_validate_reference_value(stripped, "image_reference")]
+        else:
+            return [_validate_reference_value(stripped, "image_reference")]
+
+    if isinstance(value, list):
+        return [
+            _parse_image_reference_item(item, f"image_reference[{idx}]")
+            for idx, item in enumerate(value)
+        ]
+
+    return [_parse_image_reference_item(value, "image_reference")]
 
 
 async def _upload_to_data_uri(file: UploadFile, param: str) -> str:
@@ -234,9 +284,9 @@ async def _upload_to_data_uri(file: UploadFile, param: str) -> str:
 
 async def _build_references_for_json(payload: BaseModel) -> List[str]:
     references: List[str] = []
-    parsed_image_ref = _parse_image_reference(getattr(payload, "image_reference", None))
-    if parsed_image_ref:
-        references.append(parsed_image_ref)
+    references.extend(
+        _parse_image_references(getattr(payload, "image_reference", None))
+    )
     if getattr(payload, "input_reference", None) not in (None, ""):
         raise ValidationException(
             message="input_reference must be uploaded as multipart/form-data file",
@@ -282,9 +332,7 @@ async def _build_payload_and_references_for_form(
             code="invalid_reference",
         )
 
-    parsed_image_ref = _parse_image_reference(payload.image_reference)
-    if parsed_image_ref:
-        references.append(parsed_image_ref)
+    references.extend(_parse_image_references(payload.image_reference))
     return payload, references
 
 
@@ -300,7 +348,7 @@ def _multipart_create_schema(default_seconds: int) -> Dict[str, Any]:
             "quality": {"type": "string", "default": "standard"},
             "image_reference": {
                 "type": "string",
-                "description": "JSON string for image_reference object",
+                "description": "JSON string for image_reference object or array",
             },
             "input_reference": {"type": "string", "format": "binary"},
         },
@@ -355,6 +403,12 @@ async def _create_video_from_payload(
             message="seconds must be between 7 and 30 for /video/extend",
             param="seconds",
             code="invalid_seconds",
+        )
+    if len(references) > 7:
+        raise ValidationException(
+            message="image_reference supports at most 7 references",
+            param="image_reference",
+            code="invalid_reference",
         )
 
     content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
@@ -434,7 +488,9 @@ async def create_video(request: Request):
         except ValidationError as exc:
             _raise_validation_error(exc)
         references = await _build_references_for_json(payload)
-        return await _create_video_from_payload(payload, references, require_extension=False)
+        return await _create_video_from_payload(
+            payload, references, require_extension=False
+        )
 
     form = await request.form()
     payload, references = await _build_payload_and_references_for_form(
@@ -447,7 +503,9 @@ async def create_video(request: Request):
         image_reference=form.get("image_reference"),
         input_reference=form.get("input_reference"),
     )
-    return await _create_video_from_payload(payload, references, require_extension=False)
+    return await _create_video_from_payload(
+        payload, references, require_extension=False
+    )
 
 
 @router.post(
