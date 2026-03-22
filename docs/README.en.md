@@ -1,6 +1,6 @@
 # Grok2API
 
-[中文](../readme.md) | **English** | [Docs](https://blog.cheny.me/blog/posts/grok2api)
+[中文](../README.md) | **English** | [Docs](https://blog.cheny.me/blog/posts/grok2api)
 
 > [!NOTE]
 > This project is for learning and research only. You must comply with Grok **Terms of Use** and **local laws and regulations**. Do not use for illegal purposes.
@@ -39,10 +39,13 @@ docker compose up -d
 >
 > - `SERVER_PORT`: app listening port inside the container
 > - `HOST_PORT`: host-side published port (Docker Compose only)
+> - `GROK2API_IMAGE`: override the default image tag; defaults to `ghcr.io/piexian/grok2api:latest`
 >
 > Tip: mapping follows `HOST_PORT:SERVER_PORT` - users connect to `HOST_PORT`, while the app listens on `SERVER_PORT` inside the container.
 >
 > Example: `HOST_PORT=9000 SERVER_PORT=8011 docker compose up -d`, then access `http://localhost:9000`.
+>
+> Pin a release: `GROK2API_IMAGE=ghcr.io/piexian/grok2api:v1.6.3 docker compose up -d`
 
 ### Vercel
 
@@ -73,6 +76,7 @@ docker compose up -d
 - **Status Filter**: filter by status (active/limited/expired) or NSFW status
 - **Batch Ops**: batch refresh/export/delete/enable NSFW
 - **NSFW Enable**: one-click Unhinged for tokens (proxy or `cf_clearance` required)
+- **Log Viewer**: filter structured logs by file, level, and keyword, and delete log files from the admin panel
 - **Config Management**: update system config online
 - **Cache Management**: view and clear media cache
 
@@ -206,7 +210,8 @@ curl http://localhost:8000/v1/chat/completions \
 - `grok-imagine-1.0-fast` streaming output in `/chat/completions` only returns the final image, hiding intermediate preview images.
 - `grok-imagine-1.0-fast` streaming URL output will retain the original image filename (without appending `-final`).
 - `grok-imagine-1.0-edit` requires an image; if multiple are provided, the **last 3** images and last text are used.
-- `grok-imagine-1.0-video` supports text-to-video and image-to-video via `image_url` (**only the first image is used**).
+- `grok-imagine-1.0-video` supports text-to-video and multi-reference video: pass up to `7` `image_url` blocks and use placeholders like `@图1`, `@图2`, or `@image1` in the prompt; the server replaces them with the matching `assetId`.
+- `@图N/@imageN/@imgN` placeholders map to reference order; referencing a missing index returns an error.
 - Any other parameters will be discarded and ignored.
 
 <br>
@@ -371,7 +376,7 @@ curl http://localhost:8000/v1/videos \
 | `size` | string | Frame size (mapped to aspect_ratio) | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
 | `seconds` | integer | Target duration (seconds) | `6` ~ `30` |
 | `quality` | string | Video quality (mapped to resolution) | `standard`, `high` |
-| `image_reference` | object/string | Reference image (optional) | `{"image_url":"https://..."}` or Data URI |
+| `image_reference` | array/object/string | Reference image (optional) | Prefer an OpenAI-style content-block array or URL string array; legacy single-image object/string is still accepted |
 | `input_reference` | file | multipart reference image (optional) | `png`, `jpg`, `webp` |
 
 **Notes**:
@@ -379,7 +384,8 @@ curl http://localhost:8000/v1/videos \
 - Server-side chain extension now supports 6~30 seconds automatically, so **`/v1/video/extend` is not required**.
 - `quality=standard` maps to `480p`; `quality=high` maps to `720p`.
 - For basic-pool requests at `720p`, generation falls back to `480p` first, then upscales according to `video.upscale_timing`.
-- If both `image_reference` and `input_reference` are provided, references are processed in order; the video pipeline uses the first image only.
+- `image_reference` and `input_reference` can be merged in order as references, up to `7` images total; single-image legacy input remains compatible.
+- For multi-reference requests, you can use placeholders like `@图1`, `@图2`, `@image1`, or `@img1` in the prompt, mapped by reference order.
 
 <br>
 
@@ -442,6 +448,14 @@ Config file: `data/config.toml`
 |  | `save_delay_ms` | Save delay | Merge write delay (ms). | `500` |
 |  | `usage_flush_interval_sec` | Usage flush interval | Minimum interval to flush usage fields to DB (seconds). | `5` |
 |  | `reload_interval_sec` | Reload interval | Multi-worker token reload interval (seconds). | `30` |
+|  | `consumed_mode_enabled` | Consumed mode | Enable experimental usage-consumption tracking mode. | `false` |
+|  | `on_demand_refresh_enabled` | On-demand refresh | Enable request-side on-demand token refresh. | `true` |
+|  | `on_demand_refresh_min_interval_sec` | On-demand refresh min interval | Minimum interval between request-side refreshes (seconds). | `300` |
+|  | `on_demand_refresh_max_tokens` | On-demand refresh max tokens | Maximum number of tokens checked in one request-side refresh. | `100` |
+| **log** | `max_file_size_mb` | Max file size | Max size (MB) of a single log file before rotation; `<=0` disables size-based rotation. | `100` |
+|  | `max_files` | Max files | Maximum number of rotated log files to keep; `<=0` means unlimited. | `7` |
+|  | `log_all_requests` | Log all requests | Whether to log all requests; otherwise only slow/error requests are logged. | `false` |
+|  | `request_slow_ms` | Slow request threshold | Requests slower than this value (ms) are written to logs. | `3000` |
 | **cache** | `enable_auto_clean` | Auto clean | Enable cache auto cleanup. | `true` |
 |  | `limit_mb` | Size limit | Cleanup threshold (MB). | `512` |
 | **chat** | `concurrent` | Concurrency | Reverse chat concurrency limit. | `50` |
@@ -459,7 +473,8 @@ Config file: `data/config.toml`
 | **imagine_fast** | `n` | Count | Applies to grok-imagine-1.0-fast only. | `1` |
 |  | `size` | Size | `1280x720` / `720x1280` / `1792x1024` / `1024x1792` / `1024x1024` | `1024x1024` |
 |  | `response_format` | Response format | `url` / `b64_json` / `base64` | `url` |
-| **video** | `concurrent` | Concurrency | Reverse video concurrency limit. | `100` |
+| **video** | `enable_public_asset` | Public asset | Create a publicly accessible share link after video generation finishes. | `false` |
+|  | `concurrent` | Concurrency | Reverse video concurrency limit. | `100` |
 |  | `timeout` | Timeout | Reverse video timeout (seconds). | `60` |
 |  | `stream_timeout` | Stream timeout | Stream idle timeout (seconds). | `60` |
 |  | `upscale_timing` | Upscale timing | Basic-pool 720p upscale mode: `single` (after each extension round) / `complete` (after all rounds). | `complete` |

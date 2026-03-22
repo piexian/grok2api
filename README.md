@@ -39,10 +39,13 @@ docker compose up -d
 >
 > - `SERVER_PORT`：容器内应用监听端口
 > - `HOST_PORT`：宿主机映射端口（仅 Docker Compose 使用）
+> - `GROK2API_IMAGE`：覆盖默认镜像标签；默认使用 `ghcr.io/piexian/grok2api:latest`
 >
 > 小贴士：端口映射规则是 `HOST_PORT:SERVER_PORT`，你访问的是 `HOST_PORT`，容器内服务实际监听的是 `SERVER_PORT`。
 >
 > 示例：`HOST_PORT=9000 SERVER_PORT=8011 docker compose up -d`，访问 `http://localhost:9000`。
+>
+> 固定版本示例：`GROK2API_IMAGE=ghcr.io/piexian/grok2api:v1.6.3 docker compose up -d`
 
 ### Vercel 部署
 
@@ -73,6 +76,7 @@ docker compose up -d
 - **状态筛选**：按状态（正常/限流/失效）或 NSFW 状态筛选
 - **批量操作**：批量刷新、导出、删除、开启 NSFW
 - **NSFW 开启**：一键为 Token 开启 Unhinged 模式（需代理或 `cf_clearance`）
+- **日志查看**：按文件、级别和关键词筛选结构化日志，并支持清理日志文件
 - **配置管理**：在线修改系统配置
 - **缓存管理**：查看和清理媒体缓存
 
@@ -207,7 +211,9 @@ curl http://localhost:8000/v1/chat/completions \
 - `grok-imagine-1.0-fast` 流式 URL 出图会保持原始图片名（不追加 `-final` 后缀）。
 - 当图片疑似被审查拦截导致无最终图时，若开启 `image.blocked_parallel_enabled`，服务端会按 `image.blocked_parallel_attempts` 自动并行补偿生成，并优先使用不同 token；若仍无满足 `image.final_min_bytes` 的最终图则返回失败。
 - `grok-imagine-1.0-edit` 必须提供图片，多图默认取**最后 3 张**与最后一个文本。
-- `grok-imagine-1.0-video` 支持文生视频与图生视频（通过 `image_url` 传参考图，**仅取第 1 张**）。
+- `grok-imagine-1.0-video` 支持文生视频与多图参考视频：可通过多个 `image_url` 传最多 `7` 张参考图，并在文本中使用 `@图1`、`@图2`、`@image1` 这类占位符；服务端会自动替换为对应 `assetId`。
+- `@图N/@imageN/@imgN` 与参考图顺序一一对应；若引用了不存在的图片序号，会直接报错。
+- 非流式响应与流式最终 chunk 会返回估算后的 `usage` 字段，不再固定为全 `0`。
 - 除上述外的其他参数将自动丢弃并忽略。
 
 <br>
@@ -254,6 +260,7 @@ curl http://localhost:8000/v1/responses \
 
 - 内置工具 `web_search` / `file_search` / `code_interpreter` 目前会映射为 function tool **触发调用**，但**不执行托管工具**，需客户端自行执行并回填。
 - 流式输出会包含 `response.output_text.*` 与 `response.function_call_arguments.*` 事件。
+- 非流式响应与 `response.completed` 事件会返回映射后的 `usage`，字段为 `input_tokens/output_tokens/total_tokens`。
 
 <br>
 
@@ -372,7 +379,7 @@ curl http://localhost:8000/v1/videos \
 | `size` | string | 画面比例（会映射到 aspect_ratio） | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
 | `seconds` | integer | 目标时长（秒） | `6` ~ `30` |
 | `quality` | string | 视频质量（映射到 resolution） | `standard`, `high` |
-| `image_reference` | object/string | 参考图（可选） | `{"image_url":"https://..."}` 或 Data URI |
+| `image_reference` | array/object/string | 参考图（可选） | 推荐使用 OpenAI content block 数组或 URL 字符串数组；兼容旧的单图对象/字符串 |
 | `input_reference` | file | multipart 参考图（可选） | `png`, `jpg`, `webp` |
 
 **注意事项**：
@@ -380,7 +387,8 @@ curl http://localhost:8000/v1/videos \
 - 服务端已支持 6~30 秒自动链式扩展，**无需使用 `/v1/video/extend`**。
 - `quality=standard` 对应 `480p`；`quality=high` 对应 `720p`。
 - 基础号池请求 `720p` 时会先产出 `480p` 再按 `video.upscale_timing` 执行超分。
-- `image_reference` 与 `input_reference` 同时传入时，会按顺序作为参考图输入；视频链路只使用第 1 张。
+- `image_reference` 与 `input_reference` 可按顺序合并为参考图输入，最多支持 `7` 张；单图场景仍兼容旧格式。
+- 多图参考时，可在 `prompt` 中使用 `@图1`、`@图2`、`@image1`、`@img1` 这类占位符，按参考图顺序映射。
 
 <br>
 
@@ -443,6 +451,14 @@ curl http://localhost:8000/v1/videos \
 |  | `save_delay_ms` | 保存延迟 | Token 变更合并写入的延迟（毫秒）。 | `500` |
 |  | `usage_flush_interval_sec` | 用量落库间隔 | 用量类字段写入数据库的最小间隔（秒）。 | `5` |
 |  | `reload_interval_sec` | 同步间隔 | 多 worker 场景下 Token 状态刷新间隔（秒）。 | `30` |
+|  | `consumed_mode_enabled` | 消耗模式 | 是否启用实验性的按消耗记录模式。 | `false` |
+|  | `on_demand_refresh_enabled` | 按需刷新 | 是否启用请求侧按需刷新 token 状态。 | `true` |
+|  | `on_demand_refresh_min_interval_sec` | 按需刷新最小间隔 | 两次请求侧按需刷新之间的最小间隔（秒）。 | `300` |
+|  | `on_demand_refresh_max_tokens` | 按需刷新最大检查数 | 单次请求侧按需刷新最多检查的 Token 数量。 | `100` |
+| **log** | `max_file_size_mb` | 单文件上限 | 单个日志文件大小上限（MB），超过后自动轮转；`<=0` 表示不按大小轮转。 | `100` |
+|  | `max_files` | 保留文件数 | 最多保留多少个日志文件；`<=0` 表示不限制数量。 | `7` |
+|  | `log_all_requests` | 记录全部请求 | 是否记录所有请求；关闭时仅记录慢请求与错误请求。 | `false` |
+|  | `request_slow_ms` | 慢请求阈值 | 请求耗时超过该值（毫秒）时写入日志。 | `3000` |
 | **cache** | `enable_auto_clean` | 自动清理 | 是否启用缓存自动清理，开启后按上限自动回收。 | `true` |
 |  | `limit_mb` | 清理阈值 | 缓存大小阈值（MB），超过阈值会触发清理。 | `512` |
 | **chat** | `concurrent` | 并发上限 | Reverse 接口并发上限。 | `50` |
@@ -460,7 +476,8 @@ curl http://localhost:8000/v1/videos \
 | **imagine_fast** | `n` | 生成数量 | 仅对 grok-imagine-1.0-fast 生效。 | `1` |
 |  | `size` | 图片尺寸 | `1280x720` / `720x1280` / `1792x1024` / `1024x1792` / `1024x1024` | `1024x1024` |
 |  | `response_format` | 响应格式 | `url` / `b64_json` / `base64` | `url` |
-| **video** | `concurrent` | 并发上限 | Reverse 接口并发上限。 | `100` |
+| **video** | `enable_public_asset` | Public 资产 | 是否在视频生成结束后创建可公开访问的分享链接。 | `false` |
+|  | `concurrent` | 并发上限 | Reverse 接口并发上限。 | `100` |
 |  | `timeout` | 请求超时 | Reverse 接口超时时间（秒）。 | `60` |
 |  | `stream_timeout` | 流空闲超时 | 流式空闲超时时间（秒）。 | `60` |
 |  | `upscale_timing` | 超分时机 | Basic 号池 720p 超分模式：`single`（每轮扩展后超分）/ `complete`（所有扩展后超分）。 | `complete` |
