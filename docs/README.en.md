@@ -45,7 +45,7 @@ docker compose up -d
 >
 > Example: `HOST_PORT=9000 SERVER_PORT=8011 docker compose up -d`, then access `http://localhost:9000`.
 >
-> Pin a release: `GROK2API_IMAGE=ghcr.io/piexian/grok2api:v1.6.3 docker compose up -d`
+> Pin a release: `GROK2API_IMAGE=ghcr.io/piexian/grok2api:latest docker compose up -d`
 
 ### Vercel
 

@@ -50,6 +50,10 @@ class ImageEditResult:
 class ImageEditService:
     """Image edit orchestration service."""
 
+    @staticmethod
+    def _build_request_overrides(n: int) -> dict[str, Any]:
+        return {"imageGenerationCount": max(1, int(n or 1))}
+
     async def edit(
         self,
         *,
@@ -92,7 +96,9 @@ class ImageEditService:
 
             tried_tokens.add(current_token)
             try:
-                image_urls = await self._upload_images(images, current_token)
+                file_attachments, image_urls = await self._upload_images(
+                    images, current_token
+                )
                 parent_post_id = await self._get_parent_post_id(
                     current_token, image_urls
                 )
@@ -110,16 +116,29 @@ class ImageEditService:
                         "parentPostId"
                     ] = parent_post_id
 
-                tool_overrides = {"imageGen": True}
+                tool_overrides: dict[str, Any] = {
+                    "imageGen": True,
+                    "gmailSearch": False,
+                    "googleCalendarSearch": False,
+                    "outlookSearch": False,
+                    "outlookCalendarSearch": False,
+                    "googleDriveSearch": False,
+                }
+                request_overrides = self._build_request_overrides(n)
+                request_overrides["modeId"] = "auto"
+                request_overrides["disableMemory"] = False
+                request_overrides["temporary"] = False
 
                 if stream:
                     response = await GrokChatService().chat(
                         token=current_token,
                         message=prompt,
-                        model=model_info.grok_model,
+                        model=None,
                         mode=None,
                         stream=True,
+                        file_attachments=file_attachments,
                         tool_overrides=tool_overrides,
+                        request_overrides=request_overrides,
                         model_config_override=model_config_override,
                     )
                     processor = ImageStreamProcessor(
@@ -148,6 +167,7 @@ class ImageEditService:
                     model_info=model_info,
                     n=n,
                     response_format=response_format,
+                    file_attachments=file_attachments,
                     tool_overrides=tool_overrides,
                     model_config_override=model_config_override,
                 )
@@ -199,12 +219,17 @@ class ImageEditService:
             status_code=429,
         )
 
-    async def _upload_images(self, images: List[str], token: str) -> List[str]:
+    async def _upload_images(
+        self, images: List[str], token: str
+    ) -> tuple[List[str], List[str]]:
+        file_attachments: List[str] = []
         image_urls: List[str] = []
         upload_service = UploadService()
         try:
             for image in images:
-                _, file_uri = await upload_service.upload_file(image, token)
+                file_id, file_uri = await upload_service.upload_file(image, token)
+                if file_id:
+                    file_attachments.append(file_id)
                 if file_uri:
                     if file_uri.startswith("http"):
                         image_urls.append(file_uri)
@@ -215,14 +240,14 @@ class ImageEditService:
         finally:
             await upload_service.close()
 
-        if not image_urls:
+        if not file_attachments and not image_urls:
             raise AppException(
                 message="Image upload failed",
                 error_type=ErrorType.SERVER.value,
                 code="upload_failed",
             )
 
-        return image_urls
+        return file_attachments, image_urls
 
     async def _get_parent_post_id(self, token: str, image_urls: List[str]) -> str:
         parent_post_id = None
@@ -258,19 +283,27 @@ class ImageEditService:
         model_info: Any,
         n: int,
         response_format: str,
+        file_attachments: List[str],
         tool_overrides: dict,
         model_config_override: dict,
     ) -> List[str]:
-        calls_needed = (n + 1) // 2
+        per_call = 2
+        calls_needed = max(1, (n + per_call - 1) // per_call)
 
         async def _call_edit():
+            edit_overrides = self._build_request_overrides(per_call)
+            edit_overrides["modeId"] = "auto"
+            edit_overrides["disableMemory"] = False
+            edit_overrides["temporary"] = False
             response = await GrokChatService().chat(
                 token=token,
                 message=prompt,
-                model=model_info.grok_model,
+                model=None,
                 mode=None,
                 stream=True,
+                file_attachments=file_attachments,
                 tool_overrides=tool_overrides,
+                request_overrides=edit_overrides,
                 model_config_override=model_config_override,
             )
             processor = ImageCollectProcessor(
@@ -393,7 +426,47 @@ class ImageStreamProcessor(BaseProcessor):
                         )
                     continue
 
-                # modelResponse
+                # Handle cardAttachment-based image generation (new Grok format)
+                if ca := resp.get("cardAttachment"):
+                    try:
+                        jd = orjson.loads(ca.get("jsonData", b"{}"))
+                        if jd.get("type") in (
+                            "render_generated_image",
+                            "render_edited_image",
+                        ):
+                            chunk = jd.get("image_chunk", {})
+                            if chunk.get("progress", 0) >= 100 and chunk.get(
+                                "imageUrl"
+                            ):
+                                url = f"https://assets.grok.com/{chunk['imageUrl']}"
+                                if self.response_format == "url":
+                                    processed = await self.process_url(url, "image")
+                                    if processed:
+                                        final_images.append(processed)
+                                else:
+                                    try:
+                                        dl_service = self._get_dl()
+                                        base64_data = await dl_service.parse_b64(
+                                            url, self.token, "image"
+                                        )
+                                        if base64_data:
+                                            b64 = (
+                                                base64_data.split(",", 1)[1]
+                                                if "," in base64_data
+                                                else base64_data
+                                            )
+                                            final_images.append(b64)
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Failed to convert stream card image to base64: {e}"
+                                        )
+                                        processed = await self.process_url(url, "image")
+                                        if processed:
+                                            final_images.append(processed)
+                    except Exception:
+                        pass
+
+                # modelResponse (legacy format)
                 if mr := resp.get("modelResponse"):
                     if urls := _collect_images(mr):
                         for url in urls:
@@ -550,6 +623,45 @@ class ImageCollectProcessor(BaseProcessor):
                     continue
 
                 resp = data.get("result", {}).get("response", {})
+                # Handle cardAttachment-based image generation/edit (new Grok format)
+                if ca := resp.get("cardAttachment"):
+                    try:
+                        jd = orjson.loads(ca.get("jsonData", b"{}"))
+                        if jd.get("type") in (
+                            "render_generated_image",
+                            "render_edited_image",
+                        ):
+                            chunk = jd.get("image_chunk", {})
+                            if chunk.get("progress", 0) >= 100 and chunk.get(
+                                "imageUrl"
+                            ):
+                                url = f"https://assets.grok.com/{chunk['imageUrl']}"
+                                if self.response_format == "url":
+                                    processed = await self.process_url(url, "image")
+                                    if processed:
+                                        images.append(processed)
+                                else:
+                                    try:
+                                        dl_service = self._get_dl()
+                                        base64_data = await dl_service.parse_b64(
+                                            url, self.token, "image"
+                                        )
+                                        if base64_data:
+                                            b64 = (
+                                                base64_data.split(",", 1)[1]
+                                                if "," in base64_data
+                                                else base64_data
+                                            )
+                                            images.append(b64)
+                                    except Exception as e:
+                                        logger.warning(
+                                            f"Failed to convert card image to base64: {e}"
+                                        )
+                                        processed = await self.process_url(url, "image")
+                                        if processed:
+                                            images.append(processed)
+                    except Exception:
+                        pass
 
                 if mr := resp.get("modelResponse"):
                     if urls := _collect_images(mr):

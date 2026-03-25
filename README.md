@@ -45,7 +45,7 @@ docker compose up -d
 >
 > 示例：`HOST_PORT=9000 SERVER_PORT=8011 docker compose up -d`，访问 `http://localhost:9000`。
 >
-> 固定版本示例：`GROK2API_IMAGE=ghcr.io/piexian/grok2api:v1.6.3 docker compose up -d`
+> 固定版本示例：`GROK2API_IMAGE=ghcr.io/piexian/grok2api:latest docker compose up -d`
 
 ### Vercel 部署
 

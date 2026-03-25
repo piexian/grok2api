@@ -794,6 +794,9 @@ async def chat_completions(request: ChatCompletionRequest):
 
     if model_info and model_info.is_image:
         prompt, _ = _extract_prompt_images(request.messages)
+        if request.model in ("grok-imagine-1.0", "grok-imagine-1.0-fast"):
+            if not prompt.lower().startswith("generation image:"):
+                prompt = "generation image: " + prompt
 
         is_stream = (
             request.stream if request.stream is not None else get_config("app.stream")

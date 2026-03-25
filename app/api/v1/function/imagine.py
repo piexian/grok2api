@@ -187,6 +187,8 @@ async def function_imagine_ws(websocket: WebSocket):
         stop_event.clear()
 
     async def _run(prompt: str, aspect_ratio: str, nsfw: Optional[bool]):
+        if not prompt.lower().startswith("generation image:"):
+            prompt = "generation image: " + prompt
         model_id = "grok-imagine-1.0"
         model_info = ModelService.get(model_id)
         if not model_info or not model_info.is_image:
@@ -406,6 +408,9 @@ async def function_imagine_sse(
 
     async def event_stream():
         try:
+            effective_prompt = prompt
+            if not effective_prompt.lower().startswith("generation image:"):
+                effective_prompt = "generation image: " + effective_prompt
             model_id = "grok-imagine-1.0"
             model_info = ModelService.get(model_id)
             if not model_info or not model_info.is_image:
@@ -419,7 +424,7 @@ async def function_imagine_sse(
             run_id = uuid.uuid4().hex
 
             yield (
-                f"data: {orjson.dumps({'type': 'status', 'status': 'running', 'prompt': prompt, 'aspect_ratio': ratio, 'run_id': run_id}).decode()}\n\n"
+                f"data: {orjson.dumps({'type': 'status', 'status': 'running', 'prompt': effective_prompt, 'aspect_ratio': ratio, 'run_id': run_id}).decode()}\n\n"
             )
 
             while True:
@@ -454,7 +459,7 @@ async def function_imagine_sse(
                         token_mgr=token_mgr,
                         token=token,
                         model_info=model_info,
-                        prompt=prompt,
+                        prompt=effective_prompt,
                         n=6,
                         response_format="b64_json",
                         size="1024x1024",

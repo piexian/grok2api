@@ -115,17 +115,23 @@ class AppChatReverse:
             "isAsyncChat": False,
             "isReasoning": False,
             "message": message,
-            "modelMode": mode,
-            "modelName": model,
-            "responseMetadata": {
-                "requestModelDetails": {"modelId": model},
-            },
             "returnImageBytes": False,
             "returnRawGrokInXaiRequest": False,
             "sendFinalMetadata": True,
             "temporary": get_config("app.temporary"),
             "toolOverrides": tool_overrides or {},
         }
+
+        # When model is None, use modeId-based routing (e.g. "auto")
+        # instead of explicit modelName/modelMode.
+        if model is not None:
+            payload["modelName"] = model
+            payload["modelMode"] = mode
+            payload["responseMetadata"] = {
+                "requestModelDetails": {"modelId": model},
+            }
+        else:
+            payload["responseMetadata"] = {}
 
         if model == "grok-420":
             # grok-420: 使用新的 modeId 格式，移除旧的 modelName/modelMode
