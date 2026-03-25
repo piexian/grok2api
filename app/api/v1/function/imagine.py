@@ -124,6 +124,24 @@ async def _drop_sessions(task_ids: List[str]) -> int:
 
 @router.websocket("/imagine/ws")
 async def function_imagine_ws(websocket: WebSocket):
+    # Legacy browser WebSocket transport is temporarily disabled.
+    # The image generation upstream has already moved to the app-chat path,
+    # and the function page now forces SSE so this route can be restored later
+    # without removing the old implementation below.
+    await websocket.accept()
+    await websocket.send_text(
+        orjson.dumps(
+            {
+                "type": "error",
+                "message": "Imagine WebSocket is temporarily disabled. Please use /v1/function/imagine/sse.",
+                "code": "ws_disabled",
+                "fallback": "sse",
+            }
+        ).decode()
+    )
+    await websocket.close(code=1008, reason="Imagine WebSocket temporarily disabled")
+    return
+
     session_id = None
     task_id = websocket.query_params.get("task_id")
     if task_id:

@@ -16,6 +16,7 @@ from app.services.grok.services.model import ModelService
 router = APIRouter()
 
 VIDEO_SESSION_TTL = 600
+VIDEO_MODEL_ID = "grok-imagine-1.0-video"
 _VIDEO_SESSIONS: dict[str, dict] = {}
 _VIDEO_SESSIONS_LOCK = asyncio.Lock()
 
@@ -152,6 +153,99 @@ def _collect_image_urls(
     return collected
 
 
+def _build_messages(prompt: str, image_urls: List[str]) -> List[Dict[str, Any]]:
+    if image_urls:
+        content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for image_url in image_urls:
+            content.append({"type": "image_url", "image_url": {"url": image_url}})
+        return [{"role": "user", "content": content}]
+    return [{"role": "user", "content": prompt}]
+
+
+def _sse_chunk(
+    *,
+    content: str = "",
+    role: Optional[str] = None,
+    finish_reason: Optional[str] = None,
+    usage: Optional[Dict[str, Any]] = None,
+) -> str:
+    chunk = {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": VIDEO_MODEL_ID,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {},
+                "logprobs": None,
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    delta = chunk["choices"][0]["delta"]
+    if role:
+        delta["role"] = role
+        delta["content"] = ""
+    elif content:
+        delta["content"] = content
+    if usage is not None:
+        chunk["usage"] = usage
+    return f"data: {orjson.dumps(chunk).decode()}\n\n"
+
+
+def _extract_completion_content(result: Dict[str, Any]) -> str:
+    if not isinstance(result, dict):
+        return ""
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+async def _legacy_stream_event_stream(
+    *,
+    request: Request,
+    prompt: str,
+    image_urls: List[str],
+    aspect_ratio: str,
+    video_length: int,
+    resolution_name: str,
+    preset: str,
+    reasoning_effort: Optional[str],
+):
+    """
+    Legacy upstream streaming path preserved for rollback.
+
+    This path talks to the old upstream stream flow directly. We keep it here so it
+    can be restored quickly if upstream stream generation becomes stable again, but
+    it is intentionally not called right now because direct API-style collection is
+    currently more reliable in production.
+    """
+    messages = _build_messages(prompt, image_urls)
+    stream = await VideoService.completions(
+        VIDEO_MODEL_ID,
+        messages,
+        stream=True,
+        reasoning_effort=reasoning_effort,
+        aspect_ratio=aspect_ratio,
+        video_length=video_length,
+        resolution=resolution_name,
+        preset=preset,
+    )
+
+    async for chunk in stream:
+        if await request.is_disconnected():
+            break
+        yield chunk
+
+
 class VideoStartRequest(BaseModel):
     prompt: str
     aspect_ratio: Optional[str] = "3:2"
@@ -244,8 +338,7 @@ async def function_video_sse(request: Request, task_id: str = Query("")):
 
     async def event_stream():
         try:
-            model_id = "grok-imagine-1.0-video"
-            model_info = ModelService.get(model_id)
+            model_info = ModelService.get(VIDEO_MODEL_ID)
             if not model_info or not model_info.is_video:
                 payload = {
                     "error": "Video model is not available.",
@@ -255,36 +348,37 @@ async def function_video_sse(request: Request, task_id: str = Query("")):
                 yield "data: [DONE]\n\n"
                 return
 
-            if image_urls:
-                content: List[Dict[str, Any]] = [{"type": "text", "text": prompt}]
-                for image_url in image_urls:
-                    content.append(
-                        {"type": "image_url", "image_url": {"url": image_url}}
-                    )
-                messages: List[Dict[str, Any]] = [
-                    {
-                        "role": "user",
-                        "content": content,
-                    }
-                ]
-            else:
-                messages = [{"role": "user", "content": prompt}]
+            messages = _build_messages(prompt, image_urls)
 
-            stream = await VideoService.completions(
-                model_id,
+            # Keep the outward SSE contract unchanged, but switch the upstream call
+            # to the more stable API-style non-stream path. The frontend already
+            # parses both HTML <video> snippets and URL/markdown-style results.
+            yield _sse_chunk(role="assistant")
+            yield _sse_chunk(content="[round=1/1] progress=5%\n")
+
+            result = await VideoService.completions(
+                VIDEO_MODEL_ID,
                 messages,
-                stream=True,
+                stream=False,
                 reasoning_effort=reasoning_effort,
                 aspect_ratio=aspect_ratio,
                 video_length=video_length,
                 resolution=resolution_name,
                 preset=preset,
             )
+            if await request.is_disconnected():
+                return
 
-            async for chunk in stream:
-                if await request.is_disconnected():
-                    break
-                yield chunk
+            rendered = _extract_completion_content(result)
+            if not rendered:
+                raise RuntimeError("Video generation returned empty content")
+
+            yield _sse_chunk(content=rendered)
+            yield _sse_chunk(
+                finish_reason="stop",
+                usage=result.get("usage") if isinstance(result, dict) else None,
+            )
+            yield "data: [DONE]\n\n"
         except Exception as e:
             logger.warning(f"Function video SSE error: {e}")
             payload = {"error": str(e), "code": "internal_error"}

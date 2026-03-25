@@ -33,6 +33,7 @@ class ModelInfo(BaseModel):
     cost: Cost = Field(default=Cost.LOW)
     display_name: str
     description: str = ""
+    visible_in_list: bool = True
     is_image: bool = False
     is_image_edit: bool = False
     is_video: bool = False
@@ -195,6 +196,7 @@ class ModelService:
             cost=Cost.HIGH,
             display_name="Grok Image Edit",
             description="Image edit model",
+            visible_in_list=False,
             is_image=False,
             is_image_edit=True,
             is_video=False,
@@ -221,9 +223,12 @@ class ModelService:
         return cls._map.get(model_id)
 
     @classmethod
-    def list(cls) -> list[ModelInfo]:
-        """获取所有模型"""
-        return list(cls._map.values())
+    def list(cls, *, visible_only: bool = False) -> list[ModelInfo]:
+        """获取模型列表"""
+        models = list(cls._map.values())
+        if visible_only:
+            models = [m for m in models if m.visible_in_list]
+        return models
 
     @classmethod
     def valid(cls, model_id: str) -> bool:

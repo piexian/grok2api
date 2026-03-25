@@ -20,6 +20,7 @@ def make_chat_chunk(
     index: int = 0,
     role: str = "assistant",
     is_final: bool = False,
+    usage: Optional[dict] = None,
 ) -> dict:
     """
     Create an OpenAI-compatible chat completion chunk.
@@ -55,7 +56,7 @@ def make_chat_chunk(
     }
 
     if is_final:
-        chunk["usage"] = {
+        chunk["usage"] = usage or {
             "total_tokens": 0,
             "input_tokens": 0,
             "output_tokens": 0,

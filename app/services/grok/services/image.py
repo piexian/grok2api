@@ -29,6 +29,7 @@ from app.services.grok.services.image_edit import (
     ImageCollectProcessor as AppChatImageCollectProcessor,
 )
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.grok.utils.usage import estimate_image_usage
 from app.services.reverse.utils.retry import extract_retry_after
 from app.services.token import EffortType
 from app.services.reverse.ws_imagine import ImagineWebSocketReverse
@@ -116,6 +117,7 @@ class ImageGenerationService:
                             prompt=prompt,
                             n=n,
                             response_format=response_format,
+                            size=size,
                             enable_nsfw=enable_nsfw,
                             chat_format=chat_format,
                         )
@@ -179,6 +181,7 @@ class ImageGenerationService:
                     prompt=prompt,
                     n=n,
                     response_format=response_format,
+                    size=size,
                     enable_nsfw=enable_nsfw,
                 )
             except UpstreamException as e:
@@ -214,6 +217,7 @@ class ImageGenerationService:
         prompt: str,
         n: int,
         response_format: str,
+        size: str,
         enable_nsfw: Optional[bool] = None,
         chat_format: bool = False,
     ) -> ImageGenerationResult:
@@ -231,6 +235,8 @@ class ImageGenerationService:
             token,
             n=n,
             response_format=response_format,
+            prompt_text=prompt,
+            size=size,
             chat_format=chat_format,
         )
         stream = wrap_stream_with_usage(
@@ -250,6 +256,7 @@ class ImageGenerationService:
         prompt: str,
         n: int,
         response_format: str,
+        size: str,
         enable_nsfw: Optional[bool] = None,
     ) -> ImageGenerationResult:
         per_call = min(max(1, n), 2)
@@ -314,12 +321,12 @@ class ImageGenerationService:
             logger.warning(f"Failed to consume token: {e}")
 
         selected = self._select_images(all_images, n)
-        usage_override = {
-            "total_tokens": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
-        }
+        usage_override = estimate_image_usage(
+            prompt_text=prompt,
+            outputs=selected,
+            response_format=response_format,
+            size=size,
+        )
         return ImageGenerationResult(
             stream=False, data=selected, usage_override=usage_override
         )
@@ -356,6 +363,7 @@ class ImageGenerationService:
             n=n,
             response_format=response_format,
             size=size,
+            prompt_text=prompt,
             chat_format=chat_format,
         )
         stream = wrap_stream_with_usage(
@@ -377,6 +385,7 @@ class ImageGenerationService:
         n: int,
         response_format: str,
         aspect_ratio: str,
+        size: str = "1024x1024",
         enable_nsfw: Optional[bool] = None,
     ) -> ImageGenerationResult:
         if enable_nsfw is None:
@@ -514,12 +523,12 @@ class ImageGenerationService:
             logger.warning(f"Failed to consume token: {e}")
 
         selected = self._select_images(all_images, n)
-        usage_override = {
-            "total_tokens": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "input_tokens_details": {"text_tokens": 0, "image_tokens": 0},
-        }
+        usage_override = estimate_image_usage(
+            prompt_text=prompt,
+            outputs=selected,
+            response_format=response_format,
+            size=size,
+        )
         return ImageGenerationResult(
             stream=False, data=selected, usage_override=usage_override
         )
@@ -661,11 +670,13 @@ class ImageWSStreamProcessor(ImageWSBaseProcessor):
         n: int = 1,
         response_format: str = "b64_json",
         size: str = "1024x1024",
+        prompt_text: str = "",
         chat_format: bool = False,
     ):
         super().__init__(model, token, response_format)
         self.n = n
         self.size = size
+        self.prompt_text = prompt_text
         self.chat_format = chat_format
         self._target_id: Optional[str] = None
         self._index_map: Dict[str, int] = {}
@@ -841,6 +852,20 @@ class ImageWSStreamProcessor(ImageWSBaseProcessor):
             if not output:
                 continue
 
+            raw_output = (
+                item.get("blob", "")
+                if self.response_format != "url"
+                else output.removeprefix("![image](").removesuffix(")")
+                if self.chat_format
+                else output
+            )
+            usage = estimate_image_usage(
+                prompt_text=self.prompt_text,
+                outputs=[raw_output],
+                response_format=self.response_format,
+                size=self.size,
+            )
+
             if self.n == 1:
                 index = 0
             else:
@@ -861,6 +886,7 @@ class ImageWSStreamProcessor(ImageWSBaseProcessor):
                         output,
                         index=index,
                         is_final=True,
+                        usage=usage,
                     ),
                 )
             else:
@@ -875,15 +901,7 @@ class ImageWSStreamProcessor(ImageWSBaseProcessor):
                         "index": index,
                         "image_id": image_id,
                         "stage": "final",
-                        "usage": {
-                            "total_tokens": 0,
-                            "input_tokens": 0,
-                            "output_tokens": 0,
-                            "input_tokens_details": {
-                                "text_tokens": 0,
-                                "image_tokens": 0,
-                            },
-                        },
+                        "usage": usage,
                     },
                 )
 

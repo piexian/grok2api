@@ -171,7 +171,14 @@ class VideoExtendService:
             model_config_override=model_config_override,
         )
 
-        result = await VideoCollectProcessor(VIDEO_MODEL_ID, token).process(response)
+        result = await VideoCollectProcessor(
+            VIDEO_MODEL_ID,
+            token,
+            messages=[{"role": "user", "content": prompt}],
+            aspect_ratio=aspect_ratio,
+            video_length=video_length,
+            resolution_name=resolution_name,
+        ).process(response)
         choices = result.get("choices") if isinstance(result, dict) else None
         if not isinstance(choices, list) or not choices:
             raise UpstreamException("Video extension failed: empty result")
@@ -207,6 +214,7 @@ class VideoExtendService:
             "length": video_length,
             "resolution": resolution_name,
             "url": video_url,
+            "usage": result.get("usage") if isinstance(result, dict) else None,
         }
 
 

@@ -363,9 +363,10 @@ def _build_create_response(
     seconds: int,
     quality: str,
     url: str,
+    usage: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     ts = int(time.time())
-    return {
+    payload = {
         "id": f"video_{uuid.uuid4().hex[:24]}",
         "object": "video",
         "created_at": ts,
@@ -378,6 +379,9 @@ def _build_create_response(
         "quality": quality,
         "url": url,
     }
+    if usage is not None:
+        payload["usage"] = usage
+    return payload
 
 
 async def _create_video_from_payload(
@@ -444,6 +448,7 @@ async def _create_video_from_payload(
             seconds=seconds,
             quality=quality,
             url=video_url,
+            usage=result.get("usage") if isinstance(result, dict) else None,
         )
     )
 

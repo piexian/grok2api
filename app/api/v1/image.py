@@ -423,6 +423,7 @@ async def edit_image(
         images=images,
         n=edit_request.n,
         response_format=response_format,
+        size=edit_request.size,
         stream=bool(edit_request.stream),
     )
 
@@ -439,7 +440,8 @@ async def edit_image(
         content={
             "created": int(time.time()),
             "data": data,
-            "usage": {
+            "usage": result.usage_override
+            or {
                 "total_tokens": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,

@@ -30,8 +30,8 @@
   let latencyCount = 0;
   let lastRunId = '';
   let isRunning = false;
-  let connectionMode = 'ws';
-  let modePreference = 'auto';
+  let connectionMode = 'sse';
+  let modePreference = 'sse';
   const MODE_STORAGE_KEY = 'imagine_mode';
   let pendingFallbackTimer = null;
   let currentTaskIds = [];
@@ -88,10 +88,9 @@
   }
 
   function setModePreference(mode, persist = true) {
-    if (!['auto', 'ws', 'sse'].includes(mode)) return;
-    modePreference = mode;
+    modePreference = 'sse';
     modeButtons.forEach(btn => {
-      if (btn.dataset.mode === mode) {
+      if (btn.dataset.mode === 'sse') {
         btn.classList.add('active');
       } else {
         btn.classList.remove('active');
@@ -99,7 +98,7 @@
     });
     if (persist) {
       try {
-        localStorage.setItem(MODE_STORAGE_KEY, mode);
+        localStorage.setItem(MODE_STORAGE_KEY, 'sse');
       } catch (e) {
         // ignore
       }
@@ -705,88 +704,11 @@
     }
     currentTaskIds = taskIds;
 
-    if (modePreference === 'sse') {
-      startSSE(taskIds, rawPublicKey);
-      return;
-    }
-
-    connectionMode = 'ws';
-    stopAllConnections();
-    updateModeValue();
-
-    let opened = 0;
-    let fallbackDone = false;
-    let fallbackTimer = null;
-    if (modePreference === 'auto') {
-      fallbackTimer = setTimeout(() => {
-        if (!fallbackDone && opened === 0) {
-          fallbackDone = true;
-          startSSE(taskIds, rawPublicKey);
-        }
-      }, 1500);
-    }
-    pendingFallbackTimer = fallbackTimer;
-
-    wsConnections = [];
-
-    for (let i = 0; i < taskIds.length; i++) {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const params = new URLSearchParams({ task_id: taskIds[i] });
-      if (rawPublicKey) {
-        params.set('function_key', rawPublicKey);
-      }
-      const wsUrl = `${protocol}://${window.location.host}/v1/function/imagine/ws?${params.toString()}`;
-      const ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        opened += 1;
-        updateActive();
-        if (i === 0) {
-          setStatus('connected', t('common.generating'));
-          setButtons(true);
-          toast(t('imagine.startedTasks', { count: concurrent }), 'success');
-        }
-        sendStart(prompt, ws);
-      };
-
-      ws.onmessage = (event) => {
-        handleMessage(event.data);
-      };
-
-      ws.onclose = () => {
-        updateActive();
-        if (connectionMode !== 'ws') {
-          return;
-        }
-        const remaining = wsConnections.filter(w => w && w.readyState === WebSocket.OPEN).length;
-        if (remaining === 0 && !fallbackDone) {
-          setStatus('', t('common.notConnected'));
-          setButtons(false);
-          isRunning = false;
-          updateModeValue();
-        }
-      };
-
-      ws.onerror = () => {
-        updateActive();
-        if (modePreference === 'auto' && opened === 0 && !fallbackDone) {
-          fallbackDone = true;
-          if (fallbackTimer) {
-            clearTimeout(fallbackTimer);
-          }
-          startSSE(taskIds, rawPublicKey);
-          return;
-        }
-        if (i === 0 && wsConnections.filter(w => w && w.readyState === WebSocket.OPEN).length === 0) {
-          setStatus('error', t('common.connectionError'));
-          startBtn.disabled = false;
-          isRunning = false;
-          updateModeValue();
-        }
-      };
-
-      wsConnections.push(ws);
-    }
+    // Legacy browser WS transport is intentionally bypassed for now because
+    // that path is unstable. Keep the old WS helpers in this file so the page
+    // can be switched back quickly if the transport recovers.
+    startSSE(taskIds, rawPublicKey);
+    return;
   }
 
   function sendStart(promptOverride, targetWs) {
@@ -886,24 +808,11 @@
   }
 
   if (modeButtons.length > 0) {
-    const saved = (() => {
-      try {
-        return localStorage.getItem(MODE_STORAGE_KEY);
-      } catch (e) {
-        return null;
-      }
-    })();
-    if (saved) {
-      setModePreference(saved, false);
-    } else {
-      setModePreference('auto', false);
-    }
+    setModePreference('sse', false);
 
     modeButtons.forEach(btn => {
       btn.addEventListener('click', () => {
-        const mode = btn.dataset.mode;
-        if (!mode) return;
-        setModePreference(mode);
+        setModePreference('sse');
         if (isRunning) {
           stopConnection().then(() => {
             setTimeout(() => startConnection(), 50);

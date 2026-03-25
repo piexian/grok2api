@@ -31,6 +31,7 @@ from app.services.grok.utils.process import (
 )
 from app.services.grok.utils.retry import rate_limited
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.grok.utils.usage import estimate_video_usage
 from app.services.reverse.app_chat import AppChatReverse
 from app.services.reverse.media_post import MediaPostReverse
 from app.services.reverse.media_post_link import MediaPostLinkReverse
@@ -763,7 +764,13 @@ class _VideoChainSSEWriter:
         self.role_sent = False
         self.think_opened = False
 
-    def _sse(self, content: str = "", role: str = None, finish: str = None) -> str:
+    def _sse(
+        self,
+        content: str = "",
+        role: str = None,
+        finish: str = None,
+        usage: Optional[Dict[str, Any]] = None,
+    ) -> str:
         delta: Dict[str, Any] = {}
         if role:
             delta["role"] = role
@@ -785,6 +792,8 @@ class _VideoChainSSEWriter:
                 }
             ],
         }
+        if usage is not None:
+            chunk["usage"] = usage
         return f"data: {orjson.dumps(chunk).decode()}\n\n"
 
     def ensure_role(self) -> List[str]:
@@ -832,12 +841,12 @@ class _VideoChainSSEWriter:
             chunks.append(self._sse(text))
         return chunks
 
-    def finish(self) -> List[str]:
+    def finish(self, usage: Optional[Dict[str, Any]] = None) -> List[str]:
         chunks = self.ensure_role()
         if self.think_opened:
             self.think_opened = False
             chunks.append(self._sse("\n</think>\n"))
-        chunks.append(self._sse(finish="stop"))
+        chunks.append(self._sse(finish="stop", usage=usage))
         chunks.append("data: [DONE]\n\n")
         return chunks
 
@@ -1078,7 +1087,7 @@ class VideoService:
             )
             return await _collect_round_result(response, model=model, source=source)
 
-        async def _stream_chain() -> AsyncGenerator[str, None]:
+        async def _legacy_stream_chain() -> AsyncGenerator[str, None]:
             writer = _VideoChainSSEWriter(model, show_think)
             seed_id = seed_post_id
             last_id = seed_id
@@ -1217,6 +1226,55 @@ class VideoService:
                     )
                 raise
 
+        async def _stream_collect_chain() -> AsyncGenerator[str, None]:
+            """
+            Preserve the external streaming contract while switching the upstream
+            request path to collect-style generation, which is currently more
+            reliable than the legacy upstream stream chain.
+
+            The old upstream stream implementation remains in `_legacy_stream_chain`
+            for quick rollback if the upstream stream path stabilizes again.
+            """
+            writer = _VideoChainSSEWriter(model, show_think)
+            try:
+                for chunk in writer.ensure_role():
+                    yield chunk
+                for chunk in writer.emit_progress(
+                    round_index=1,
+                    total_rounds=max(1, len(round_plan)),
+                    progress=5,
+                ):
+                    yield chunk
+
+                result = await _collect_chain()
+                choices = result.get("choices") if isinstance(result, dict) else None
+                if not isinstance(choices, list) or not choices:
+                    raise UpstreamException("Video generation failed: empty result")
+
+                message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+                rendered = message.get("content", "") if isinstance(message, dict) else ""
+                if not isinstance(rendered, str) or not rendered.strip():
+                    raise UpstreamException("Video generation failed: empty content")
+
+                for chunk in writer.emit_content(rendered):
+                    yield chunk
+                for chunk in writer.finish(result.get("usage")):
+                    yield chunk
+            except asyncio.CancelledError:
+                logger.debug(
+                    "Video stream collect chain cancelled by client",
+                    extra={"model": model},
+                )
+                raise
+            except UpstreamException as e:
+                if rate_limited(e):
+                    await token_mgr.mark_rate_limited(
+                        token,
+                        model_id=model,
+                        retry_after_sec=extract_retry_after(e),
+                    )
+                raise
+
         async def _collect_chain() -> Dict[str, Any]:
             seed_id = seed_post_id
             last_id = seed_id
@@ -1314,15 +1372,19 @@ class VideoService:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                },
+                "usage": estimate_video_usage(
+                    messages=messages,
+                    content=content,
+                    aspect_ratio=aspect_ratio,
+                    seconds=video_length,
+                    resolution=resolution,
+                ),
             }
 
         if is_stream:
-            return wrap_stream_with_usage(_stream_chain(), token_mgr, token, model)
+            return wrap_stream_with_usage(
+                _stream_collect_chain(), token_mgr, token, model
+            )
 
         try:
             result = await _collect_chain()
@@ -1465,6 +1527,10 @@ class VideoCollectProcessor:
         upscale_on_finish: bool = False,
         round_index: int = 1,
         round_total: int = 1,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        aspect_ratio: str = "3:2",
+        video_length: int = 6,
+        resolution_name: str = "480p",
     ):
         self.model = model
         self.token = token
@@ -1472,6 +1538,10 @@ class VideoCollectProcessor:
         self.enable_public_asset = _public_asset_enabled()
         self.round_index = max(1, int(round_index or 1))
         self.round_total = max(self.round_index, int(round_total or self.round_index))
+        self.messages = list(messages or [])
+        self.aspect_ratio = aspect_ratio
+        self.video_length = int(video_length or 6)
+        self.resolution_name = resolution_name
         self._dl_service: Optional[DownloadService] = None
 
     def _get_dl(self) -> DownloadService:
@@ -1534,11 +1604,13 @@ class VideoCollectProcessor:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                },
+                "usage": estimate_video_usage(
+                    messages=self.messages,
+                    content=content,
+                    aspect_ratio=self.aspect_ratio,
+                    seconds=self.video_length,
+                    resolution=self.resolution_name,
+                ),
             }
         finally:
             await self.close()

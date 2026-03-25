@@ -35,6 +35,7 @@ from app.services.grok.utils.response import (
 from app.services.grok.services.chat import GrokChatService
 from app.services.grok.services.video import VideoService
 from app.services.grok.utils.stream import wrap_stream_with_usage
+from app.services.grok.utils.usage import estimate_image_usage
 from app.services.reverse.utils.retry import extract_retry_after
 from app.services.token import EffortType
 
@@ -43,6 +44,7 @@ from app.services.token import EffortType
 class ImageEditResult:
     stream: bool
     data: Union[AsyncGenerator[str, None], List[str]]
+    usage_override: dict | None = None
 
 
 class ImageEditService:
@@ -58,6 +60,7 @@ class ImageEditService:
         images: List[str],
         n: int,
         response_format: str,
+        size: str = "1024x1024",
         stream: bool,
         chat_format: bool = False,
     ) -> ImageEditResult:
@@ -124,6 +127,9 @@ class ImageEditService:
                         current_token,
                         n=n,
                         response_format=response_format,
+                        prompt_text=prompt,
+                        size=size,
+                        input_images=images,
                         chat_format=chat_format,
                     )
                     return ImageEditResult(
@@ -157,7 +163,17 @@ class ImageEditService:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to record image edit usage: {e}")
-                return ImageEditResult(stream=False, data=images_out)
+                return ImageEditResult(
+                    stream=False,
+                    data=images_out,
+                    usage_override=estimate_image_usage(
+                        prompt_text=prompt,
+                        input_images=images,
+                        outputs=images_out,
+                        response_format=response_format,
+                        size=size,
+                    ),
+                )
 
             except UpstreamException as e:
                 last_error = e
@@ -308,6 +324,9 @@ class ImageStreamProcessor(BaseProcessor):
         token: str = "",
         n: int = 1,
         response_format: str = "b64_json",
+        prompt_text: str = "",
+        size: str = "1024x1024",
+        input_images: List[str] | None = None,
         chat_format: bool = False,
     ):
         super().__init__(model, token)
@@ -315,6 +334,9 @@ class ImageStreamProcessor(BaseProcessor):
         self.n = n
         self.target_index = 0 if n == 1 else None
         self.response_format = response_format
+        self.prompt_text = prompt_text
+        self.size = size
+        self.input_images = list(input_images or [])
         self.chat_format = chat_format
         self._id_generated = False
         self._response_id = ""
@@ -408,6 +430,14 @@ class ImageStreamProcessor(BaseProcessor):
                 else:
                     out_index = index
 
+                usage = estimate_image_usage(
+                    prompt_text=self.prompt_text,
+                    input_images=self.input_images,
+                    outputs=[img_data],
+                    response_format=self.response_format,
+                    size=self.size,
+                )
+
                 # Wrap in markdown format for chat
                 output = img_data
                 if self.chat_format and output:
@@ -428,6 +458,7 @@ class ImageStreamProcessor(BaseProcessor):
                             output,
                             index=out_index,
                             is_final=True,
+                            usage=usage,
                         ),
                     )
                 else:
@@ -438,15 +469,7 @@ class ImageStreamProcessor(BaseProcessor):
                             "type": "image_generation.completed",
                             self.response_field: img_data,
                             "index": out_index,
-                            "usage": {
-                                "total_tokens": 0,
-                                "input_tokens": 0,
-                                "output_tokens": 0,
-                                "input_tokens_details": {
-                                    "text_tokens": 0,
-                                    "image_tokens": 0,
-                                },
-                            },
+                            "usage": usage,
                         },
                     )
 

@@ -771,6 +771,7 @@ async def chat_completions(request: ChatCompletionRequest):
             images=image_urls,
             n=n,
             response_format=response_format,
+            size=image_conf.size or "1024x1024",
             stream=bool(is_stream),
             chat_format=True,
         )
@@ -783,7 +784,13 @@ async def chat_completions(request: ChatCompletionRequest):
             )
 
         content = result.data[0] if result.data else ""
-        return JSONResponse(content=make_chat_response(request.model, content))
+        return JSONResponse(
+            content=make_chat_response(
+                request.model,
+                content,
+                usage=result.usage_override,
+            )
+        )
 
     if model_info and model_info.is_image:
         prompt, _ = _extract_prompt_images(request.messages)
