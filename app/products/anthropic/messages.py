@@ -36,7 +36,6 @@ from app.products.openai.chat import (
     _resolve_image,
     _quota_sync,
     _fail_sync,
-    _parse_retry_codes,
     _feedback_kind,
     _log_task_exception,
     _configured_retry_codes,
@@ -520,7 +519,6 @@ async def create(
 
     cfg = get_config()
     spec = resolve_model(model)
-    mode_id = int(spec.mode_id)
 
     # Build internal message list
     internal_messages = _parse_anthropic_messages(messages, system)

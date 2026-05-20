@@ -33,7 +33,6 @@ from .chat import (
     _resolve_image,
     _quota_sync,
     _fail_sync,
-    _parse_retry_codes,
     _feedback_kind,
     _log_task_exception,
     _upstream_body_excerpt,
@@ -50,7 +49,6 @@ from app.dataplane.reverse.protocol.tool_prompt import (
     build_tool_system_prompt,
     extract_tool_names,
     inject_into_message,
-    tool_calls_to_xml,
 )
 from app.dataplane.reverse.protocol.tool_parser import parse_tool_calls
 from ._tool_sieve import ToolSieve
@@ -526,7 +524,6 @@ async def create(
 
     cfg = get_config()
     spec = resolve_model(model)
-    mode_id = int(spec.mode_id)  # cast once, reuse everywhere
 
     messages: list[dict] = []
     if instructions:
