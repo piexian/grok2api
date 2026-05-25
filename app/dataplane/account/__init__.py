@@ -252,6 +252,7 @@ class AccountDirectory:
         ts = now_s_val if now_s_val is not None else now_s()
 
         strategy = current_strategy()
+        increment_global_success = False
 
         async with self._lock:
             if kind == FeedbackKind.SUCCESS:
@@ -259,6 +260,7 @@ class AccountDirectory:
                     fb.apply_success_random(table, idx)
                 else:
                     fb.apply_success_quota(table, idx, mode_id)
+                increment_global_success = True
 
             elif kind == FeedbackKind.RATE_LIMITED:
                 if strategy == "random":
@@ -288,6 +290,9 @@ class AccountDirectory:
                 reset_s = int(reset_at_ms // 1000)
                 fb.apply_quota_update(table, idx, mode_id, remaining, reset_s)
 
+        if increment_global_success:
+            await self._increment_global_success_count()
+
     # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------
@@ -299,6 +304,12 @@ class AccountDirectory:
     @property
     def revision(self) -> int:
         return self._table.revision if self._table else 0
+
+    async def _increment_global_success_count(self) -> None:
+        try:
+            await self._repo.increment_global_success_count()
+        except Exception as exc:
+            logger.debug("global success count update failed: error={}", exc)
 
 
 # ---------------------------------------------------------------------------

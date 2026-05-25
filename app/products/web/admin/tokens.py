@@ -26,6 +26,7 @@ from app.control.account.commands import (
     ListAccountsQuery,
 )
 from app.control.account.enums import AccountStatus
+from app.control.account.state_machine import derive_status
 
 if TYPE_CHECKING:
     from app.control.account.refresh import AccountRefreshService
@@ -119,11 +120,18 @@ def _quota_brief(q: dict) -> dict:
 
 
 def _serialize_record(r) -> dict:
+    status = derive_status(r)
+    quota = (
+        _quota_brief(r.quota)
+        if status in (AccountStatus.ACTIVE, AccountStatus.COOLING)
+        and isinstance(r.quota, dict)
+        else {}
+    )
     return {
         "token":       r.token,
         "pool":        r.pool or "basic",
-        "status":      r.status,
-        "quota":       _quota_brief(r.quota) if isinstance(r.quota, dict) else {},
+        "status":      status,
+        "quota":       quota,
         "use_count":   r.usage_use_count or 0,
         "last_used_at": r.last_use_at,
         "tags":        r.tags or [],
@@ -143,6 +151,7 @@ def _json(data) -> Response:
 async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
     """Return flat token list."""
     all_items: list = []
+    global_success_count = await repo.get_global_success_count()
     page_num = 1
     while True:
         page = await repo.list_accounts(ListAccountsQuery(page=page_num, page_size=2000))
@@ -151,7 +160,10 @@ async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
             break
         page_num += 1
 
-    return _json({"tokens": [_serialize_record(r) for r in all_items]})
+    return _json({
+        "tokens": [_serialize_record(r) for r in all_items],
+        "stats": {"success_count": global_success_count},
+    })
 
 
 @router.post("/tokens")

@@ -1094,7 +1094,7 @@
 const PAGE_SIZE_KEY = 'admin.account.page_size';
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000];
 
-let allTokens = [], curStatus = 'all', curNsfw = 'all', curPool = 'all', curPage = 1, pageSize = loadSavedPageSize();
+let allTokens = [], globalSuccessCount = 0, curStatus = 'all', curNsfw = 'all', curPool = 'all', curPage = 1, pageSize = loadSavedPageSize();
 const sel = new Set();
 const refreshingTokens = new Set();
 let _cb = null;
@@ -1191,6 +1191,7 @@ async function load() {
       ? data.tokens
       : Object.entries(data.tokens || {}).flatMap(([pool, items]) =>
           Array.isArray(items) ? items.map(t => ({ ...t, pool: t.pool || pool })) : []);
+    globalSuccessCount = Number(data.stats?.success_count ?? 0) || 0;
     applyStrategyUI();
     invalidateTokenView();
     render();
@@ -1225,8 +1226,8 @@ function getTokenView() {
     cooling: 0,
     invalid: 0,
     disabled: 0,
-    calls: 0,
-    success: 0,
+    calls: globalSuccessCount,
+    success: globalSuccessCount,
     fail: 0,
     qa: 0,
     qf: 0,
@@ -1245,21 +1246,21 @@ function getTokenView() {
     const nsfwEnabled = (token.tags || []).includes('nsfw');
     const invalid = isInvalidStatus(token.status);
     const disabled = isDisabledStatus(token.status);
+    const quotaCounts = isQuotaCountedStatus(token.status);
     const matchesPool = curPool === 'all' || pool === curPool;
     const matchesStatus = curStatus === 'all'
       || (curStatus === 'invalid' ? invalid : curStatus === 'disabled' ? disabled : token.status === curStatus);
     const matchesNsfw = curNsfw === 'all' || (curNsfw === 'enabled' ? nsfwEnabled : !nsfwEnabled);
 
     poolsSet.add(pool);
-    const successCount = token.use_count || 0;
     const failCount = token.fail_count || 0;
-    stats.success += successCount;
     stats.fail += failCount;
-    stats.calls += successCount + failCount;
-    stats.qa += quota.auto?.remaining || 0;
-    stats.qf += quota.fast?.remaining || 0;
-    stats.qe += quota.expert?.remaining || 0;
-    stats.qh += quota.heavy?.remaining || 0;
+    if (quotaCounts) {
+      stats.qa += quota.auto?.remaining || 0;
+      stats.qf += quota.fast?.remaining || 0;
+      stats.qe += quota.expert?.remaining || 0;
+      stats.qh += quota.heavy?.remaining || 0;
+    }
 
     if (token.status === 'active') stats.active += 1;
     if (token.status === 'cooling') stats.cooling += 1;
@@ -1315,6 +1316,10 @@ function isDisabledStatus(status) {
 
 function isInvalidStatus(status) {
   return !['active', 'cooling', 'disabled'].includes(status);
+}
+
+function isQuotaCountedStatus(status) {
+  return status === 'active' || status === 'cooling';
 }
 
 function renderStats(view = getTokenView()) {

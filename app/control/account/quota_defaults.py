@@ -7,6 +7,10 @@ Canonical quota totals per pool type (from upstream rate-limits API):
   super         50     140      50        —        50        window: 7200 s
   heavy        150     400     150       20       150        window: 7200 s
 
+Console.x.ai models use a local-only quota window shared by every pool:
+30 calls / 15 minutes. The grok.com rate-limits API does not know this
+mode, so callers that sync upstream usage must use ``usage_sync_mode_ids``.
+
 Pool inference uses ``auto.total`` as the primary signal for super/heavy
 accounts; basic accounts no longer expose auto/expert windows locally.
 """
@@ -42,11 +46,14 @@ def _w(remaining: int, total: int, window_seconds: int) -> QuotaWindow:
 
 BASIC_FAST_LIMIT = 30
 BASIC_FAST_WINDOW_SECONDS = 86_400
+CONSOLE_LIMIT = 30
+CONSOLE_WINDOW_SECONDS = 900
 
 BASIC_QUOTA_DEFAULTS = AccountQuotaSet(
     auto=_w(0, 0, 0),  # unsupported on basic accounts
     fast=_w(BASIC_FAST_LIMIT, BASIC_FAST_LIMIT, BASIC_FAST_WINDOW_SECONDS),
     expert=_w(0, 0, 0),  # unsupported on basic accounts
+    console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
 SUPER_QUOTA_DEFAULTS = AccountQuotaSet(
@@ -54,6 +61,7 @@ SUPER_QUOTA_DEFAULTS = AccountQuotaSet(
     fast=_w(140, 140, 7_200),  # 140 queries / 2 h
     expert=_w(50, 50, 7_200),  # 50  queries / 2 h
     grok_4_3=_w(50, 50, 7_200),  # 50  queries / 2 h
+    console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
 HEAVY_QUOTA_DEFAULTS = AccountQuotaSet(
@@ -62,6 +70,7 @@ HEAVY_QUOTA_DEFAULTS = AccountQuotaSet(
     expert=_w(150, 150, 7_200),  # 150 queries / 2 h
     heavy=_w(20, 20, 7_200),  # 20  queries / 2 h
     grok_4_3=_w(150, 150, 7_200),  # 150 queries / 2 h
+    console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
 # Map pool name → defaults object (used by backends on upsert).
@@ -72,9 +81,9 @@ _POOL_DEFAULTS: dict[str, AccountQuotaSet] = {
 }
 
 _SUPPORTED_MODE_IDS_BY_POOL: dict[str, frozenset[int]] = {
-    "basic": frozenset((1,)),
-    "super": frozenset((0, 1, 2, 4)),
-    "heavy": frozenset((0, 1, 2, 3, 4)),
+    "basic": frozenset((1, 5)),
+    "super": frozenset((0, 1, 2, 4, 5)),
+    "heavy": frozenset((0, 1, 2, 3, 4, 5)),
 }
 
 # ---------------------------------------------------------------------------
@@ -102,6 +111,10 @@ def default_quota_set(pool: str) -> AccountQuotaSet:
         qs.grok_4_3 = _w(
             src.grok_4_3.remaining, src.grok_4_3.total, src.grok_4_3.window_seconds
         )
+    if src.console is not None:
+        qs.console = _w(
+            src.console.remaining, src.console.total, src.console.window_seconds
+        )
     return qs
 
 
@@ -117,7 +130,16 @@ def supported_mode_ids(pool: str) -> tuple[int, ...]:
     supported = _SUPPORTED_MODE_IDS_BY_POOL.get(
         pool, _SUPPORTED_MODE_IDS_BY_POOL["basic"]
     )
-    return tuple(mode_id for mode_id in (0, 1, 2, 3, 4) if mode_id in supported)
+    return tuple(mode_id for mode_id in (0, 1, 2, 3, 4, 5) if mode_id in supported)
+
+
+def usage_sync_mode_ids(pool: str) -> tuple[int, ...]:
+    """Return grok.com rate-limits API mode IDs for *pool*.
+
+    Console mode (5) is local-only and must never be sent to the upstream
+    usage endpoint, whose supported model names only cover modes 0..4.
+    """
+    return tuple(mode_id for mode_id in supported_mode_ids(pool) if mode_id != 5)
 
 
 def default_quota_window(pool: str, mode_id: int) -> QuotaWindow | None:
@@ -156,6 +178,7 @@ def normalize_quota_set(pool: str, quota_set: AccountQuotaSet) -> AccountQuotaSe
     qs = AccountQuotaSet(auto=auto, fast=fast, expert=expert)
     qs.heavy = normalize_quota_window(pool, 3, quota_set.heavy)
     qs.grok_4_3 = normalize_quota_window(pool, 4, quota_set.grok_4_3)
+    qs.console = normalize_quota_window(pool, 5, quota_set.console) or defaults.console
     return qs
 
 
@@ -182,4 +205,5 @@ __all__ = [
     "normalize_quota_window",
     "supported_mode_ids",
     "supports_mode",
+    "usage_sync_mode_ids",
 ]

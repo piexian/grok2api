@@ -27,12 +27,12 @@ COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-dev --no-install-project \
+RUN UV_HTTP_TIMEOUT=120 uv sync --frozen --no-dev --no-install-project \
     && find /opt/venv -type d \
          \( -name "__pycache__" -o -name "tests" -o -name "test" -o -name "testing" \) \
          -prune -exec rm -rf {} + \
     && find /opt/venv -type f -name "*.pyc" -delete \
-    && find /opt/venv -type f -name "*.so" -exec strip --strip-unneeded {} + 2>/dev/null; true \
+    && (find /opt/venv -type f -name "*.so" -exec strip --strip-unneeded {} + 2>/dev/null || true) \
     && rm -rf /root/.cache /tmp/uv-cache
 
 # ── Runtime ───────────────────────────────────────────────────────────────────

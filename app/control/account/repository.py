@@ -24,6 +24,14 @@ class AccountRepository(Protocol):
         """Return the current global revision counter."""
         ...
 
+    async def get_global_success_count(self) -> int:
+        """Return the cumulative successful-call count across all accounts."""
+        ...
+
+    async def increment_global_success_count(self, delta: int = 1) -> int:
+        """Increment and return the cumulative successful-call count."""
+        ...
+
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         """Return all non-deleted accounts for hot-path bootstrap."""
         ...

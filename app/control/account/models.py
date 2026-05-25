@@ -69,10 +69,11 @@ class QuotaWindow:
 
 @dataclass(slots=True)
 class AccountQuotaSet:
-    """Quota set — one window per mode (auto / fast / expert / heavy / grok_4_3).
+    """Quota set — one window per mode (auto / fast / expert / heavy / grok_4_3 / console).
 
     ``heavy``    is ``None`` for basic and super accounts.
     ``grok_4_3`` is ``None`` for basic accounts (super/heavy only).
+    ``console``  is locally tracked for console.x.ai models.
     """
 
     auto: QuotaWindow
@@ -80,9 +81,10 @@ class AccountQuotaSet:
     expert: QuotaWindow
     heavy: QuotaWindow | None = None  # heavy-pool accounts only
     grok_4_3: QuotaWindow | None = None  # super/heavy accounts only
+    console: QuotaWindow | None = None  # console.x.ai local quota
 
     def get(self, mode_id: int) -> QuotaWindow | None:
-        """Return the quota window for *mode_id* (0=auto, 1=fast, 2=expert, 3=heavy, 4=grok_4_3)."""
+        """Return the quota window for *mode_id* (0=auto, 1=fast, 2=expert, 3=heavy, 4=grok_4_3, 5=console)."""
         if mode_id == 0:
             return self.auto
         if mode_id == 1:
@@ -93,6 +95,8 @@ class AccountQuotaSet:
             return self.heavy
         if mode_id == 4:
             return self.grok_4_3
+        if mode_id == 5:
+            return self.console
         return None
 
     def set(self, mode_id: int, window: QuotaWindow) -> None:
@@ -105,8 +109,10 @@ class AccountQuotaSet:
             self.expert = window
         elif mode_id == 3:
             self.heavy = window
+        elif mode_id == 4:
+            self.grok_4_3 = window
         else:
-            self.grok_4_3 = window  # mode_id == 4
+            self.console = window  # mode_id == 5
 
     def to_dict(self) -> dict[str, dict[str, Any]]:
         d: dict[str, dict[str, Any]] = {
@@ -118,18 +124,22 @@ class AccountQuotaSet:
             d["heavy"] = self.heavy.to_dict()
         if self.grok_4_3 is not None:
             d["grok_4_3"] = self.grok_4_3.to_dict()
+        if self.console is not None:
+            d["console"] = self.console.to_dict()
         return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "AccountQuotaSet":
         heavy_d = d.get("heavy")
         grok_4_3_d = d.get("grok_4_3")
+        console_d = d.get("console")
         return cls(
             auto=QuotaWindow.from_dict(d.get("auto", {})),
             fast=QuotaWindow.from_dict(d.get("fast", {})),
             expert=QuotaWindow.from_dict(d.get("expert", {})),
             heavy=QuotaWindow.from_dict(heavy_d) if heavy_d else None,
             grok_4_3=QuotaWindow.from_dict(grok_4_3_d) if grok_4_3_d else None,
+            console=QuotaWindow.from_dict(console_d) if console_d else None,
         )
 
 

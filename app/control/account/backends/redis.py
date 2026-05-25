@@ -8,7 +8,6 @@ Layout:
 """
 
 import json
-from typing import Any
 
 from app.platform.runtime.clock import now_ms
 from ..commands import AccountPatch, AccountUpsert, BulkReplacePoolCommand, ListAccountsQuery
@@ -25,6 +24,7 @@ from redis.asyncio import Redis
 from ..quota_defaults import default_quota_set
 
 _KEY_REV      = "accounts:rev"
+_KEY_GLOBAL_SUCCESS_COUNT = "accounts:global_success_count"
 _KEY_RECORD   = "accounts:record:{token}"
 _KEY_POOL     = "accounts:pool:{pool}"
 _KEY_REV_LOG  = "accounts:revision_log"
@@ -64,6 +64,8 @@ class RedisAccountRepository:
             "quota_fast":       json.dumps(qs.fast.to_dict()),
             "quota_expert":     json.dumps(qs.expert.to_dict()),
             "quota_heavy":      json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
+            "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+            "quota_console":    json.dumps(qs.console.to_dict()) if qs.console else "{}",
             "usage_use_count":  str(record.usage_use_count),
             "usage_fail_count": str(record.usage_fail_count),
             "usage_sync_count": str(record.usage_sync_count),
@@ -102,6 +104,12 @@ class RedisAccountRepository:
                 **({
                     "heavy": json.loads(_s("quota_heavy"))
                 } if _s("quota_heavy") and _s("quota_heavy") != "{}" else {}),
+                **({
+                    "grok_4_3": json.loads(_s("quota_grok_4_3"))
+                } if _s("quota_grok_4_3") and _s("quota_grok_4_3") != "{}" else {}),
+                **({
+                    "console": json.loads(_s("quota_console"))
+                } if _s("quota_console") and _s("quota_console") != "{}" else {}),
             },
             "usage_use_count":  int(_s("usage_use_count")  or 0),
             "usage_fail_count": int(_s("usage_fail_count") or 0),
@@ -130,10 +138,28 @@ class RedisAccountRepository:
 
     async def initialize(self) -> None:
         await self._r.setnx(_KEY_REV, "0")
+        if await self._r.setnx(_KEY_GLOBAL_SUCCESS_COUNT, "0"):
+            total = 0
+            async for key in self._r.scan_iter("accounts:record:*"):
+                value = await self._r.hget(key, "usage_use_count")
+                if value:
+                    total += int(value)
+            if total:
+                await self._r.set(_KEY_GLOBAL_SUCCESS_COUNT, str(total))
 
     async def get_revision(self) -> int:
         v = await self._r.get(_KEY_REV)
         return int(v) if v else 0
+
+    async def get_global_success_count(self) -> int:
+        v = await self._r.get(_KEY_GLOBAL_SUCCESS_COUNT)
+        return int(v) if v else 0
+
+    async def increment_global_success_count(self, delta: int = 1) -> int:
+        delta = max(0, int(delta))
+        if delta == 0:
+            return await self.get_global_success_count()
+        return int(await self._r.incrby(_KEY_GLOBAL_SUCCESS_COUNT, delta))
 
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         rev = await self.get_revision()
@@ -238,8 +264,6 @@ class RedisAccountRepository:
             if not h:
                 continue
             record = self._from_hash(patch.token, h)
-            qs = record.quota_set()
-
             updates: dict[str, str] = {
                 "updated_at": str(ts),
                 "revision":   str(rev),
@@ -268,6 +292,10 @@ class RedisAccountRepository:
                 updates["quota_expert"] = json.dumps(patch.quota_expert)
             if patch.quota_heavy is not None:
                 updates["quota_heavy"] = json.dumps(patch.quota_heavy)
+            if patch.quota_grok_4_3 is not None:
+                updates["quota_grok_4_3"] = json.dumps(patch.quota_grok_4_3)
+            if patch.quota_console is not None:
+                updates["quota_console"] = json.dumps(patch.quota_console)
 
             # Usage counters.
             if patch.usage_use_delta is not None:

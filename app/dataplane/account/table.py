@@ -29,6 +29,7 @@ _QUOTA_COLS = (
     "quota_expert",
     "quota_heavy",
     "quota_grok_4_3",
+    "quota_console",
 )
 _RESET_COLS = (
     "reset_auto",
@@ -36,6 +37,7 @@ _RESET_COLS = (
     "reset_expert",
     "reset_heavy",
     "reset_grok_4_3",
+    "reset_console",
 )
 _INFLIGHT_CAP = 32_767  # avoid int16 overflow on quota
 
@@ -78,6 +80,9 @@ class AccountRuntimeTable:
     quota_grok_4_3_by_idx: "array.array[int]" = field(
         default_factory=lambda: array.array("h")
     )
+    quota_console_by_idx: "array.array[int]" = field(
+        default_factory=lambda: array.array("h")
+    )
 
     # --- Quota total per mode (int16; 0 = unsupported / unknown) ---
     total_auto_by_idx: "array.array[int]" = field(
@@ -93,6 +98,9 @@ class AccountRuntimeTable:
         default_factory=lambda: array.array("h")
     )
     total_grok_4_3_by_idx: "array.array[int]" = field(
+        default_factory=lambda: array.array("h")
+    )
+    total_console_by_idx: "array.array[int]" = field(
         default_factory=lambda: array.array("h")
     )
 
@@ -112,6 +120,9 @@ class AccountRuntimeTable:
     window_grok_4_3_by_idx: "array.array[int]" = field(
         default_factory=lambda: array.array("L")
     )
+    window_console_by_idx: "array.array[int]" = field(
+        default_factory=lambda: array.array("L")
+    )
 
     # --- Window reset timestamps (uint32 epoch-seconds; 0 = unknown) ---
     reset_auto_at_by_idx: "array.array[int]" = field(
@@ -127,6 +138,9 @@ class AccountRuntimeTable:
         default_factory=lambda: array.array("L")
     )
     reset_grok_4_3_at_by_idx: "array.array[int]" = field(
+        default_factory=lambda: array.array("L")
+    )
+    reset_console_at_by_idx: "array.array[int]" = field(
         default_factory=lambda: array.array("L")
     )
 
@@ -179,7 +193,9 @@ class AccountRuntimeTable:
             return self.quota_expert_by_idx
         if mode_id == 3:
             return self.quota_heavy_by_idx
-        return self.quota_grok_4_3_by_idx
+        if mode_id == 4:
+            return self.quota_grok_4_3_by_idx
+        return self.quota_console_by_idx
 
     def _reset_col(self, mode_id: int) -> "array.array[int]":
         if mode_id == 0:
@@ -190,7 +206,9 @@ class AccountRuntimeTable:
             return self.reset_expert_at_by_idx
         if mode_id == 3:
             return self.reset_heavy_at_by_idx
-        return self.reset_grok_4_3_at_by_idx
+        if mode_id == 4:
+            return self.reset_grok_4_3_at_by_idx
+        return self.reset_console_at_by_idx
 
     def _total_col(self, mode_id: int) -> "array.array[int]":
         if mode_id == 0:
@@ -201,7 +219,9 @@ class AccountRuntimeTable:
             return self.total_expert_by_idx
         if mode_id == 3:
             return self.total_heavy_by_idx
-        return self.total_grok_4_3_by_idx
+        if mode_id == 4:
+            return self.total_grok_4_3_by_idx
+        return self.total_console_by_idx
 
     def _window_col(self, mode_id: int) -> "array.array[int]":
         if mode_id == 0:
@@ -212,7 +232,9 @@ class AccountRuntimeTable:
             return self.window_expert_by_idx
         if mode_id == 3:
             return self.window_heavy_by_idx
-        return self.window_grok_4_3_by_idx
+        if mode_id == 4:
+            return self.window_grok_4_3_by_idx
+        return self.window_console_by_idx
 
     def _add_to_indexes(self, idx: int) -> None:
         pool_id   = int(self.pool_by_idx[idx])
@@ -254,21 +276,25 @@ class AccountRuntimeTable:
         quota_expert:    int,
         quota_heavy:     int,
         quota_grok_4_3:  int,
+        quota_console:   int,
         total_auto:      int,
         total_fast:      int,
         total_expert:    int,
         total_heavy:     int,
         total_grok_4_3:  int,
+        total_console:   int,
         window_auto:     int,
         window_fast:     int,
         window_expert:   int,
         window_heavy:    int,
         window_grok_4_3: int,
+        window_console:  int,
         reset_auto:      int,
         reset_fast:      int,
         reset_expert:    int,
         reset_heavy:     int,
         reset_grok_4_3:  int,
+        reset_console:   int,
         health:          float,
         last_use_s:      int,
         last_fail_s:     int,
@@ -285,21 +311,25 @@ class AccountRuntimeTable:
         self.quota_expert_by_idx.append(max(-1, min(quota_expert, 32767)))
         self.quota_heavy_by_idx.append(max(-1, min(quota_heavy, 32767)))
         self.quota_grok_4_3_by_idx.append(max(-1, min(quota_grok_4_3, 32767)))
+        self.quota_console_by_idx.append(max(-1, min(quota_console, 32767)))
         self.total_auto_by_idx.append(max(0, min(total_auto, 32767)))
         self.total_fast_by_idx.append(max(0, min(total_fast, 32767)))
         self.total_expert_by_idx.append(max(0, min(total_expert, 32767)))
         self.total_heavy_by_idx.append(max(0, min(total_heavy, 32767)))
         self.total_grok_4_3_by_idx.append(max(0, min(total_grok_4_3, 32767)))
+        self.total_console_by_idx.append(max(0, min(total_console, 32767)))
         self.window_auto_by_idx.append(max(0, window_auto))
         self.window_fast_by_idx.append(max(0, window_fast))
         self.window_expert_by_idx.append(max(0, window_expert))
         self.window_heavy_by_idx.append(max(0, window_heavy))
         self.window_grok_4_3_by_idx.append(max(0, window_grok_4_3))
+        self.window_console_by_idx.append(max(0, window_console))
         self.reset_auto_at_by_idx.append(reset_auto)
         self.reset_fast_at_by_idx.append(reset_fast)
         self.reset_expert_at_by_idx.append(reset_expert)
         self.reset_heavy_at_by_idx.append(reset_heavy)
         self.reset_grok_4_3_at_by_idx.append(reset_grok_4_3)
+        self.reset_console_at_by_idx.append(reset_console)
         self.inflight_by_idx.append(0)
         self.fail_count_by_idx.append(min(fail_count, 65535))
         self.health_by_idx.append(health)
@@ -325,21 +355,25 @@ class AccountRuntimeTable:
         quota_expert: int,
         quota_heavy: int,
         quota_grok_4_3: int,
+        quota_console: int,
         total_auto: int,
         total_fast: int,
         total_expert: int,
         total_heavy: int,
         total_grok_4_3: int,
+        total_console: int,
         window_auto: int,
         window_fast: int,
         window_expert: int,
         window_heavy: int,
         window_grok_4_3: int,
+        window_console: int,
         reset_auto: int,
         reset_fast: int,
         reset_expert: int,
         reset_heavy: int,
         reset_grok_4_3: int,
+        reset_console: int,
         health: float,
         last_use_s: int,
         last_fail_s: int,
@@ -357,21 +391,25 @@ class AccountRuntimeTable:
         self.quota_expert_by_idx[idx] = max(-1, min(quota_expert, 32767))
         self.quota_heavy_by_idx[idx] = max(-1, min(quota_heavy, 32767))
         self.quota_grok_4_3_by_idx[idx] = max(-1, min(quota_grok_4_3, 32767))
+        self.quota_console_by_idx[idx] = max(-1, min(quota_console, 32767))
         self.total_auto_by_idx[idx] = max(0, min(total_auto, 32767))
         self.total_fast_by_idx[idx] = max(0, min(total_fast, 32767))
         self.total_expert_by_idx[idx] = max(0, min(total_expert, 32767))
         self.total_heavy_by_idx[idx] = max(0, min(total_heavy, 32767))
         self.total_grok_4_3_by_idx[idx] = max(0, min(total_grok_4_3, 32767))
+        self.total_console_by_idx[idx] = max(0, min(total_console, 32767))
         self.window_auto_by_idx[idx] = max(0, window_auto)
         self.window_fast_by_idx[idx] = max(0, window_fast)
         self.window_expert_by_idx[idx] = max(0, window_expert)
         self.window_heavy_by_idx[idx] = max(0, window_heavy)
         self.window_grok_4_3_by_idx[idx] = max(0, window_grok_4_3)
+        self.window_console_by_idx[idx] = max(0, window_console)
         self.reset_auto_at_by_idx[idx] = reset_auto
         self.reset_fast_at_by_idx[idx] = reset_fast
         self.reset_expert_at_by_idx[idx] = reset_expert
         self.reset_heavy_at_by_idx[idx] = reset_heavy
         self.reset_grok_4_3_at_by_idx[idx] = reset_grok_4_3
+        self.reset_console_at_by_idx[idx] = reset_console
         self.fail_count_by_idx[idx] = min(fail_count, 65535)
         self.last_use_at_by_idx[idx] = last_use_s
         self.last_fail_at_by_idx[idx] = last_fail_s

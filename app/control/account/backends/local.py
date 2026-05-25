@@ -21,6 +21,8 @@ from ..quota_defaults import default_quota_set
 
 _TBL = "accounts"
 _META = "account_meta"
+_META_REVISION_KEY = "revision"
+_META_GLOBAL_SUCCESS_COUNT_KEY = "global_success_count"
 
 
 class LocalAccountRepository:
@@ -51,7 +53,7 @@ class LocalAccountRepository:
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                INSERT OR IGNORE INTO {_META} VALUES ('revision', '0');
+                INSERT OR IGNORE INTO {_META} VALUES ('{_META_REVISION_KEY}', '0');
 
                 CREATE TABLE IF NOT EXISTS {_TBL} (
                     token              TEXT    NOT NULL PRIMARY KEY,
@@ -65,6 +67,7 @@ class LocalAccountRepository:
                     quota_expert       TEXT    NOT NULL DEFAULT '{{}}',
                     quota_heavy        TEXT    NOT NULL DEFAULT '{{}}',
                     quota_grok_4_3     TEXT    NOT NULL DEFAULT '{{}}',
+                    quota_console      TEXT    NOT NULL DEFAULT '{{}}',
                     usage_use_count    INTEGER NOT NULL DEFAULT 0,
                     usage_fail_count   INTEGER NOT NULL DEFAULT 0,
                     usage_sync_count   INTEGER NOT NULL DEFAULT 0,
@@ -86,6 +89,8 @@ class LocalAccountRepository:
                     ON {_TBL} (deleted_at) WHERE deleted_at IS NOT NULL;
             """)
             self._ensure_column_sync(conn, "quota_grok_4_3", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column_sync(conn, "quota_console", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_global_success_count_sync(conn)
             conn.commit()
 
     @staticmethod
@@ -94,18 +99,45 @@ class LocalAccountRepository:
         if name not in cols:
             conn.execute(f"ALTER TABLE {_TBL} ADD COLUMN {name} {ddl}")
 
+    @staticmethod
+    def _ensure_global_success_count_sync(conn: sqlite3.Connection) -> None:
+        row = conn.execute(
+            f"SELECT value FROM {_META} WHERE key = ?",
+            (_META_GLOBAL_SUCCESS_COUNT_KEY,),
+        ).fetchone()
+        if row is not None:
+            return
+        total = conn.execute(
+            f"SELECT COALESCE(SUM(usage_use_count), 0) FROM {_TBL}"
+        ).fetchone()[0]
+        conn.execute(
+            f"INSERT INTO {_META} (key, value) VALUES (?, ?)",
+            (_META_GLOBAL_SUCCESS_COUNT_KEY, str(int(total or 0))),
+        )
+
     def _bump_revision(self, conn: sqlite3.Connection) -> int:
         conn.execute(
-            f"UPDATE {_META} SET value = CAST(value AS INTEGER) + 1 WHERE key = 'revision'"
+            f"UPDATE {_META} SET value = CAST(value AS INTEGER) + 1 WHERE key = ?",
+            (_META_REVISION_KEY,),
         )
         row = conn.execute(
-            f"SELECT CAST(value AS INTEGER) FROM {_META} WHERE key = 'revision'"
+            f"SELECT CAST(value AS INTEGER) FROM {_META} WHERE key = ?",
+            (_META_REVISION_KEY,),
         ).fetchone()
         return int(row[0])
 
     def _get_revision_sync(self, conn: sqlite3.Connection) -> int:
         row = conn.execute(
-            f"SELECT CAST(value AS INTEGER) FROM {_META} WHERE key = 'revision'"
+            f"SELECT CAST(value AS INTEGER) FROM {_META} WHERE key = ?",
+            (_META_REVISION_KEY,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    @staticmethod
+    def _get_global_success_count_sync(conn: sqlite3.Connection) -> int:
+        row = conn.execute(
+            f"SELECT CAST(value AS INTEGER) FROM {_META} WHERE key = ?",
+            (_META_GLOBAL_SUCCESS_COUNT_KEY,),
         ).fetchone()
         return int(row[0]) if row else 0
 
@@ -115,14 +147,17 @@ class LocalAccountRepository:
         d["tags"]  = json.loads(d.get("tags")  or "[]")
         heavy_raw     = d.pop("quota_heavy",     "{}") or "{}"
         grok_4_3_raw  = d.pop("quota_grok_4_3",  "{}") or "{}"
+        console_raw   = d.pop("quota_console",   "{}") or "{}"
         heavy_dict    = json.loads(heavy_raw)
         grok_4_3_dict = json.loads(grok_4_3_raw)
+        console_dict  = json.loads(console_raw)
         d["quota"] = {
             "auto":   json.loads(d.pop("quota_auto",   "{}") or "{}"),
             "fast":   json.loads(d.pop("quota_fast",   "{}") or "{}"),
             "expert": json.loads(d.pop("quota_expert", "{}") or "{}"),
             **({"heavy":    heavy_dict}    if heavy_dict    else {}),
             **({"grok_4_3": grok_4_3_dict} if grok_4_3_dict else {}),
+            **({"console":  console_dict}  if console_dict  else {}),
         }
         d["ext"] = json.loads(d.get("ext") or "{}")
         return AccountRecord.model_validate(d)
@@ -142,6 +177,7 @@ class LocalAccountRepository:
             "quota_expert":     json.dumps(qs.expert.to_dict()),
             "quota_heavy":      json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
             "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+            "quota_console":    json.dumps(qs.console.to_dict())  if qs.console  else "{}",
             "usage_use_count":  record.usage_use_count,
             "usage_fail_count": record.usage_fail_count,
             "usage_sync_count": record.usage_sync_count,
@@ -175,12 +211,12 @@ class LocalAccountRepository:
                 f"""
                 INSERT INTO {_TBL} (
                     token, pool, status, created_at, updated_at,
-                    tags, quota_auto, quota_fast, quota_expert, quota_heavy, quota_grok_4_3,
+                    tags, quota_auto, quota_fast, quota_expert, quota_heavy, quota_grok_4_3, quota_console,
                     usage_use_count, usage_fail_count, usage_sync_count,
                     ext, revision
                 ) VALUES (
                     :token, :pool, 'active', :ts, :ts,
-                    :tags, :qa, :qf, :qe, :qh, :qg,
+                    :tags, :qa, :qf, :qe, :qh, :qg, :qc,
                     0, 0, 0, :ext, :rev
                 )
                 ON CONFLICT(token) DO UPDATE SET
@@ -202,6 +238,7 @@ class LocalAccountRepository:
                     "qe":    json.dumps(qs.expert.to_dict()),
                     "qh":    json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
                     "qg":    json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+                    "qc":    json.dumps(qs.console.to_dict())  if qs.console  else "{}",
                     "ext":   json.dumps(item.ext),
                     "rev":   revision,
                 },
@@ -225,8 +262,6 @@ class LocalAccountRepository:
             if row is None:
                 continue
             record = self._row_to_record(row)
-            qs = record.quota_set()
-
             sets: dict[str, Any] = {"updated_at": ts, "revision": revision}
 
             if patch.pool is not None:
@@ -265,6 +300,8 @@ class LocalAccountRepository:
                 sets["quota_heavy"] = json.dumps(patch.quota_heavy)
             if patch.quota_grok_4_3 is not None:
                 sets["quota_grok_4_3"] = json.dumps(patch.quota_grok_4_3)
+            if patch.quota_console is not None:
+                sets["quota_console"] = json.dumps(patch.quota_console)
 
             # Tags — use set arithmetic to avoid O(n×m) membership tests.
             tag_set: set[str] = set(record.tags)
@@ -313,6 +350,36 @@ class LocalAccountRepository:
             with closing(self._connect()) as conn:
                 return self._get_revision_sync(conn)
         return await asyncio.to_thread(_sync)
+
+    async def get_global_success_count(self) -> int:
+        def _sync() -> int:
+            with closing(self._connect()) as conn:
+                self._ensure_global_success_count_sync(conn)
+                conn.commit()
+                return self._get_global_success_count_sync(conn)
+
+        return await asyncio.to_thread(_sync)
+
+    async def increment_global_success_count(self, delta: int = 1) -> int:
+        delta = max(0, int(delta))
+        if delta == 0:
+            return await self.get_global_success_count()
+
+        def _sync() -> int:
+            with closing(self._connect()) as conn:
+                self._ensure_global_success_count_sync(conn)
+                conn.execute(
+                    f"UPDATE {_META} "
+                    f"SET value = CAST(value AS INTEGER) + ? "
+                    f"WHERE key = ?",
+                    (delta, _META_GLOBAL_SUCCESS_COUNT_KEY),
+                )
+                value = self._get_global_success_count_sync(conn)
+                conn.commit()
+                return value
+
+        async with self._lock:
+            return await asyncio.to_thread(_sync)
 
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         def _sync() -> RuntimeSnapshot:

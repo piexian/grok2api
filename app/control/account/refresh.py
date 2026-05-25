@@ -16,8 +16,9 @@ from .quota_defaults import (
     default_quota_window,
     infer_pool,
     normalize_quota_window,
-    supported_mode_ids,
+    normalize_quota_set,
     supports_mode,
+    usage_sync_mode_ids,
 )
 from .state_machine import is_manageable
 
@@ -51,6 +52,7 @@ _MODE_KEYS = {
     2: "quota_expert",
     3: "quota_heavy",
     4: "quota_grok_4_3",
+    5: "quota_console",
 }
 
 
@@ -86,7 +88,7 @@ class AccountRefreshService:
         try:
             from app.dataplane.reverse.protocol.xai_usage import fetch_all_quotas
 
-            return await fetch_all_quotas(token, supported_mode_ids(pool))
+            return await fetch_all_quotas(token, usage_sync_mode_ids(pool))
         except UpstreamError:
             raise
         except Exception as exc:
@@ -152,6 +154,11 @@ class AccountRefreshService:
         """Fire-and-forget single-mode quota sync after a successful call."""
         record = (await self._repo.get_accounts([token]) or [None])[0]
         if record is None or record.is_deleted():
+            return
+        if mode_id == 5:
+            await self._apply_single_mode(
+                record, mode_id, window=None, is_use=True, use_at_ms=now_ms()
+            )
             return
         try:
             window = await self._fetch_mode_quota(token, record.pool, mode_id)
@@ -251,7 +258,7 @@ class AccountRefreshService:
             return await self._apply_fallback(record)
 
         # We got at least a response — apply real data per mode.
-        qs = record.quota_set()
+        qs = normalize_quota_set(record.pool, record.quota_set())
         now = now_ms()
         patches: dict[str, dict] = {}
         refreshed = False
@@ -327,7 +334,7 @@ class AccountRefreshService:
 
     async def _apply_fallback(self, record: AccountRecord) -> RefreshResult:
         """Conservative fallback when API is unreachable (scheduled/import path only)."""
-        qs = record.quota_set()
+        qs = normalize_quota_set(record.pool, record.quota_set())
         now = now_ms()
         patches: dict[str, dict] = {}
 
@@ -439,7 +446,7 @@ class AccountRefreshService:
         is_use: bool = False,
         use_at_ms: int | None = None,
     ) -> None:
-        qs = record.quota_set()
+        qs = normalize_quota_set(record.pool, record.quota_set())
         mode_key = _MODE_KEYS.get(mode_id)
         if mode_key is None:
             logger.warning(
@@ -465,14 +472,30 @@ class AccountRefreshService:
         else:
             existing = qs.get(mode_id)
             if existing is not None:
-                quota_patch[mode_key] = QuotaWindow(
-                    remaining=max(0, existing.remaining - 1),
-                    total=existing.total,
-                    window_seconds=existing.window_seconds,
-                    reset_at=existing.reset_at,
-                    synced_at=existing.synced_at,
-                    source=QuotaSource.ESTIMATED,
-                ).to_dict()
+                now = now_ms()
+                if existing.is_window_expired(now):
+                    default = default_quota_window(record.pool, mode_id)
+                    if default is not None:
+                        quota_patch[mode_key] = QuotaWindow(
+                            remaining=max(0, default.total - 1),
+                            total=default.total,
+                            window_seconds=default.window_seconds,
+                            reset_at=now + default.window_seconds * 1000,
+                            synced_at=now,
+                            source=QuotaSource.DEFAULT,
+                        ).to_dict()
+                else:
+                    reset_at = existing.reset_at
+                    if reset_at is None and existing.window_seconds > 0:
+                        reset_at = now + existing.window_seconds * 1000
+                    quota_patch[mode_key] = QuotaWindow(
+                        remaining=max(0, existing.remaining - 1),
+                        total=existing.total,
+                        window_seconds=existing.window_seconds,
+                        reset_at=reset_at,
+                        synced_at=existing.synced_at,
+                        source=QuotaSource.ESTIMATED,
+                    ).to_dict()
             else:
                 logger.debug(
                     "account single-mode quota patch skipped: token={}... pool={} mode_id={} reason=unsupported_mode",

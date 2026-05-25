@@ -30,6 +30,8 @@ from ..quota_defaults import default_quota_set
 
 _TBL_ACCOUNTS = "accounts"
 _TBL_META     = "account_meta"
+_META_REVISION_KEY = "revision"
+_META_GLOBAL_SUCCESS_COUNT_KEY = "global_success_count"
 
 metadata = sa.MetaData()
 
@@ -47,6 +49,7 @@ accounts_table = sa.Table(
     sa.Column("quota_expert",     sa.Text,    nullable=False, default="{}"),
     sa.Column("quota_heavy",      sa.Text,    nullable=False, default="{}"),
     sa.Column("quota_grok_4_3",   sa.Text,    nullable=False, default="{}"),
+    sa.Column("quota_console",    sa.Text,    nullable=False, default="{}"),
     sa.Column("usage_use_count",  sa.Integer, nullable=False, default=0),
     sa.Column("usage_fail_count", sa.Integer, nullable=False, default=0),
     sa.Column("usage_sync_count", sa.Integer, nullable=False, default=0),
@@ -407,14 +410,17 @@ def _row_to_record(row: Any) -> AccountRecord:
     d["tags"]  = json.loads(d.get("tags")  or "[]")
     heavy_raw     = d.pop("quota_heavy",    "{}") or "{}"
     grok_4_3_raw  = d.pop("quota_grok_4_3", "{}") or "{}"
+    console_raw   = d.pop("quota_console",  "{}") or "{}"
     heavy_dict    = json.loads(heavy_raw)
     grok_4_3_dict = json.loads(grok_4_3_raw)
+    console_dict  = json.loads(console_raw)
     d["quota"] = {
         "auto":   json.loads(d.pop("quota_auto",   "{}") or "{}"),
         "fast":   json.loads(d.pop("quota_fast",   "{}") or "{}"),
         "expert": json.loads(d.pop("quota_expert", "{}") or "{}"),
         **({"heavy":    heavy_dict}    if heavy_dict    else {}),
         **({"grok_4_3": grok_4_3_dict} if grok_4_3_dict else {}),
+        **({"console":  console_dict}  if console_dict  else {}),
     }
     d["ext"] = json.loads(d.get("ext") or "{}")
     return AccountRecord.model_validate(d)
@@ -444,19 +450,28 @@ class SqlAccountRepository:
     async def _bump_revision(self, conn: Any) -> int:
         await conn.execute(
             meta_table.update()
-            .where(meta_table.c.key == "revision")
+            .where(meta_table.c.key == _META_REVISION_KEY)
             .values(value=sa.cast(
                 sa.cast(meta_table.c.value, sa.BigInteger) + 1, sa.Text
             ))
         )
         row = await conn.execute(
-            sa.select(meta_table.c.value).where(meta_table.c.key == "revision")
+            sa.select(meta_table.c.value).where(meta_table.c.key == _META_REVISION_KEY)
         )
         return int(row.scalar())
 
     async def _get_revision(self, conn: Any) -> int:
         row = await conn.execute(
-            sa.select(meta_table.c.value).where(meta_table.c.key == "revision")
+            sa.select(meta_table.c.value).where(meta_table.c.key == _META_REVISION_KEY)
+        )
+        v = row.scalar()
+        return int(v) if v else 0
+
+    async def _get_global_success_count(self, conn: Any) -> int:
+        row = await conn.execute(
+            sa.select(meta_table.c.value).where(
+                meta_table.c.key == _META_GLOBAL_SUCCESS_COUNT_KEY
+            )
         )
         v = row.scalar()
         return int(v) if v else 0
@@ -508,16 +523,17 @@ class SqlAccountRepository:
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
                 await conn.execute(
                     pg_insert(meta_table)
-                    .values(key="revision", value="0")
+                    .values(key=_META_REVISION_KEY, value="0")
                     .on_conflict_do_nothing()
                 )
             else:
                 from sqlalchemy.dialects.mysql import insert as my_insert
                 await conn.execute(
                     my_insert(meta_table)
-                    .values(key="revision", value="0")
+                    .values(key=_META_REVISION_KEY, value="0")
                     .on_duplicate_key_update(value="0")
                 )
+            await self._ensure_global_success_count(conn)
 
     async def _ensure_columns(self, conn: Any) -> None:
         """Idempotent ALTER TABLE migrations for columns added after the initial schema."""
@@ -544,6 +560,54 @@ class SqlAccountRepository:
                     f"ALTER TABLE {_TBL_ACCOUNTS} "
                     f"ADD COLUMN quota_grok_4_3 TEXT NOT NULL DEFAULT '{{}}'"
                 )
+        if "quota_console" not in existing:
+            if self._dialect == "mysql":
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {_TBL_ACCOUNTS} "
+                    f"ADD COLUMN quota_console TEXT"
+                )
+                await conn.exec_driver_sql(
+                    f"UPDATE {_TBL_ACCOUNTS} "
+                    f"SET quota_console = '{{}}' "
+                    f"WHERE quota_console IS NULL"
+                )
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {_TBL_ACCOUNTS} "
+                    f"MODIFY COLUMN quota_console TEXT NOT NULL"
+                )
+            else:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {_TBL_ACCOUNTS} "
+                    f"ADD COLUMN quota_console TEXT NOT NULL DEFAULT '{{}}'"
+                )
+
+    async def _ensure_global_success_count(self, conn: Any) -> None:
+        existing = await conn.execute(
+            sa.select(meta_table.c.value).where(
+                meta_table.c.key == _META_GLOBAL_SUCCESS_COUNT_KEY
+            )
+        )
+        if existing.scalar() is not None:
+            return
+
+        total_row = await conn.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(accounts_table.c.usage_use_count), 0))
+        )
+        total = int(total_row.scalar() or 0)
+        if self._dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            await conn.execute(
+                pg_insert(meta_table)
+                .values(key=_META_GLOBAL_SUCCESS_COUNT_KEY, value=str(total))
+                .on_conflict_do_nothing()
+            )
+        else:
+            from sqlalchemy.dialects.mysql import insert as my_insert
+            await conn.execute(
+                my_insert(meta_table)
+                .values(key=_META_GLOBAL_SUCCESS_COUNT_KEY, value=str(total))
+                .on_duplicate_key_update(value=meta_table.c.value)
+            )
 
     async def _table_columns(self, conn: Any, table: str) -> set[str]:
         if self._dialect == "postgresql":
@@ -571,6 +635,29 @@ class SqlAccountRepository:
         await self._ensure_initialized()
         async with self._engine.connect() as conn:
             return await self._get_revision(conn)
+
+    async def get_global_success_count(self) -> int:
+        await self._ensure_initialized()
+        async with self._engine.begin() as conn:
+            await self._ensure_global_success_count(conn)
+            return await self._get_global_success_count(conn)
+
+    async def increment_global_success_count(self, delta: int = 1) -> int:
+        delta = max(0, int(delta))
+        if delta == 0:
+            return await self.get_global_success_count()
+        await self._ensure_initialized()
+        async with self._engine.begin() as conn:
+            await self._ensure_global_success_count(conn)
+            await conn.execute(
+                meta_table.update()
+                .where(meta_table.c.key == _META_GLOBAL_SUCCESS_COUNT_KEY)
+                .values(value=sa.cast(
+                    sa.cast(meta_table.c.value, sa.BigInteger) + delta,
+                    sa.Text,
+                ))
+            )
+            return await self._get_global_success_count(conn)
 
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         await self._ensure_initialized()
@@ -642,6 +729,7 @@ class SqlAccountRepository:
                     "quota_expert":     json.dumps(qs.expert.to_dict()),
                     "quota_heavy":      json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
                     "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+                    "quota_console":    json.dumps(qs.console.to_dict())  if qs.console  else "{}",
                     "usage_use_count":  0,
                     "usage_fail_count": 0,
                     "usage_sync_count": 0,
@@ -698,6 +786,8 @@ class SqlAccountRepository:
                     updates["quota_heavy"] = json.dumps(patch.quota_heavy)
                 if patch.quota_grok_4_3 is not None:
                     updates["quota_grok_4_3"] = json.dumps(patch.quota_grok_4_3)
+                if patch.quota_console is not None:
+                    updates["quota_console"] = json.dumps(patch.quota_console)
                 if patch.usage_use_delta is not None:
                     updates["usage_use_count"] = max(0, record.usage_use_count + patch.usage_use_delta)
                 if patch.usage_fail_delta is not None:
