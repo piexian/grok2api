@@ -160,7 +160,6 @@
     "statTotal": "账户总数",
     "statActive": "正常账户",
     "statCooling": "限流账户",
-    "statInvalid": "异常账户",
     "statDisabled": "禁用账户",
     "statCalls": "调用总数",
     "statSuccessTotal": "成功总数",
@@ -168,13 +167,13 @@
     "statFast": "Fast 余额",
     "statExpert": "Expert 余额",
     "statHeavy": "Heavy 余额",
+    "statConsole": "Console 余额",
     "filterStatusLabel": "状态",
     "filterNsfwLabel": "NSFW",
     "filterTypeLabel": "类型",
     "filterStatusAll": "全部",
     "filterStatusActive": "正常",
     "filterStatusCooling": "限流",
-    "filterStatusInvalid": "异常",
     "filterStatusDisabled": "禁用",
     "filterNsfwAll": "全部",
     "filterNsfwEnabled": "开启",
@@ -298,7 +297,13 @@
       "fast": "Fast",
       "expert": "Expert",
       "heavy": "Heavy",
-      "grok_4_3": "Grok 4.3 Beta"
+      "grok_4_3": "Grok 4.3 Beta",
+      "console": "Console.x.ai"
+    },
+    "quotaSource": {
+      "default": "默认值",
+      "real": "真实同步",
+      "estimated": "本地估算"
     },
     "status": {
       "active": "正常",

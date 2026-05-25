@@ -20,7 +20,7 @@ async def mark_account_invalid_credentials(
     *,
     source: str,
 ) -> bool:
-    """Mark *token* as invalid when *exc* matches Grok invalid credentials."""
+    """Disable *token* when *exc* matches Grok invalid credentials."""
     from app.dataplane.reverse.protocol.xai_usage import is_invalid_credentials_error
 
     if not is_invalid_credentials_error(exc):
@@ -35,22 +35,22 @@ async def mark_account_invalid_credentials(
         [
             AccountPatch(
                 token=token,
-                status=AccountStatus.EXPIRED,
+                status=AccountStatus.DISABLED,
                 last_fail_at=ts,
                 last_fail_reason=reason,
                 state_reason=reason,
                 ext_merge={
                     **ext,
-                    "expired_at": ts,
-                    "expired_reason": reason,
+                    "disabled_at": ts,
+                    "disabled_reason": reason,
                 },
             )
         ])
     logger.info(
-        "account expired from {}: token={}... status={} upstream_status={}",
+        "account disabled from {}: token={}... status={} upstream_status={}",
         source,
         token[:10],
-        AccountStatus.EXPIRED,
+        AccountStatus.DISABLED,
         getattr(exc, "status", None) if isinstance(exc, UpstreamError) else None,
     )
     return True

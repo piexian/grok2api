@@ -214,10 +214,10 @@ def apply_feedback(
     # Status transitions.
     if feedback.kind == FeedbackKind.UNAUTHORIZED:
         if feedback.confirm_expired:
-            status = AccountStatus.EXPIRED
+            status = AccountStatus.DISABLED
             state_reason = feedback.reason or "token_expired"
-            ext[_EXPIRED_AT_KEY] = ts
-            ext[_EXPIRED_REASON_KEY] = state_reason
+            ext[_DISABLED_AT_KEY] = ts
+            ext[_DISABLED_REASON_KEY] = state_reason
         else:
             # Unconfirmed 401 — only note failure; do not expire.
             pass

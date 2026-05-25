@@ -159,7 +159,6 @@
     "statTotal": "Nombre total de comptes",
     "statActive": "Actifs",
     "statCooling": "Limités",
-    "statInvalid": "Anormaux",
     "statDisabled": "Désactivés",
     "statCalls": "Appels totaux",
     "statSuccessTotal": "Succès totaux",
@@ -167,13 +166,13 @@
     "statFast": "Solde Fast",
     "statExpert": "Solde Expert",
     "statHeavy": "Solde Heavy",
+    "statConsole": "Solde Console",
     "filterStatusLabel": "Statut",
     "filterNsfwLabel": "NSFW",
     "filterTypeLabel": "Type",
     "filterStatusAll": "Tous",
     "filterStatusActive": "Actifs",
     "filterStatusCooling": "Limités",
-    "filterStatusInvalid": "Anormaux",
     "filterStatusDisabled": "Désactivés",
     "filterNsfwAll": "Tous",
     "filterNsfwEnabled": "Activé",
@@ -297,7 +296,13 @@
       "fast": "Fast",
       "expert": "Expert",
       "heavy": "Heavy",
-      "grok_4_3": "Grok 4.3 Beta"
+      "grok_4_3": "Grok 4.3 Beta",
+      "console": "Console.x.ai"
+    },
+    "quotaSource": {
+      "default": "Par défaut",
+      "real": "Synchronisé",
+      "estimated": "Estimation locale"
     },
     "status": {
       "active": "Actif",

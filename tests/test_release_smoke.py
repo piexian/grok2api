@@ -2,10 +2,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.control.account.backends.local import LocalAccountRepository
 from app.control.account.commands import AccountPatch, AccountUpsert, ListAccountsQuery
-from app.control.account.enums import FeedbackKind
+from app.control.account.enums import AccountStatus, FeedbackKind
+from app.control.account.invalid_credentials import mark_account_invalid_credentials
 from app.control.account.quota_defaults import (
     default_quota_set,
     supported_mode_ids,
@@ -16,20 +18,22 @@ from app.control.model.registry import resolve
 from app.dataplane.account import AccountDirectory
 from app.dataplane.account.selector import set_strategy
 from app.main import app
+from app.platform.errors import UpstreamError
 from app.platform.meta import get_project_version
 
 
 async def _asgi_get(path: str) -> tuple[int, bytes]:
     messages = []
+    url = urlsplit(path)
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
         "method": "GET",
         "scheme": "http",
-        "path": path,
-        "raw_path": path.encode(),
-        "query_string": b"",
+        "path": url.path,
+        "raw_path": url.path.encode(),
+        "query_string": url.query.encode(),
         "headers": [],
         "client": ("127.0.0.1", 12345),
         "server": ("testserver", 80),
@@ -135,6 +139,64 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
             page = await repo.list_accounts(ListAccountsQuery(page=1, page_size=10))
             self.assertEqual(page.total, 1)
+            await repo.close()
+
+    async def test_admin_tokens_includes_console_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            await repo.upsert_accounts(
+                [AccountUpsert(token="tok_admin_console", pool="basic")]
+            )
+            await repo.patch_accounts(
+                [
+                    AccountPatch(
+                        token="tok_admin_console",
+                        quota_console={
+                            "remaining": 9,
+                            "total": 30,
+                            "window_seconds": 900,
+                            "reset_at": None,
+                            "synced_at": None,
+                            "source": 2,
+                        },
+                    )
+                ]
+            )
+
+            app.state.repository = repo
+            try:
+                status, body = await _asgi_get("/admin/api/tokens?app_key=grok2api")
+                self.assertEqual(status, 200)
+                tokens = json.loads(body)["tokens"]
+                token = next(t for t in tokens if t["token"] == "tok_admin_console")
+                self.assertEqual(token["quota"]["console"]["remaining"], 9)
+                self.assertEqual(token["quota"]["console"]["source"], 2)
+            finally:
+                await repo.close()
+
+    async def test_invalid_credentials_auto_disable_account(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            await repo.upsert_accounts([AccountUpsert(token="tok_invalid")])
+
+            marked = await mark_account_invalid_credentials(
+                repo,
+                "tok_invalid",
+                UpstreamError(
+                    "invalid credentials",
+                    status=401,
+                    body="invalid-credentials",
+                ),
+                source="smoke",
+            )
+
+            records = await repo.get_accounts(["tok_invalid"])
+            self.assertTrue(marked)
+            self.assertEqual(records[0].status, AccountStatus.DISABLED)
+            self.assertEqual(records[0].ext["disabled_reason"], "invalid_credentials")
+            self.assertNotIn("expired_reason", records[0].ext)
             await repo.close()
 
     async def test_asgi_health_meta_models(self):

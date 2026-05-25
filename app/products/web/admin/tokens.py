@@ -107,14 +107,18 @@ class SaveTokensRequest(RootModel[dict[str, list[str | TokenImportItem]]]):
 # ---------------------------------------------------------------------------
 
 def _quota_brief(q: dict) -> dict:
-    """Extract {auto, fast, expert, heavy} with only remaining/total from stored quota dict."""
+    """Extract compact quota windows for admin display."""
     out = {}
-    for mode in ("auto", "fast", "expert", "heavy"):
+    for mode in ("auto", "fast", "expert", "heavy", "grok_4_3", "console"):
         v = q.get(mode)
         if isinstance(v, dict):
             out[mode] = {
                 "remaining": int(v.get("remaining", 0) or 0),
                 "total": int(v.get("total", 0) or 0),
+                "window_seconds": int(v.get("window_seconds", 0) or 0),
+                "reset_at": v.get("reset_at"),
+                "synced_at": v.get("synced_at"),
+                "source": int(v.get("source", 0) or 0),
             }
     return out
 
@@ -316,6 +320,9 @@ async def edit_token(
         quota_auto=qs.auto.to_dict(),
         quota_fast=qs.fast.to_dict(),
         quota_expert=qs.expert.to_dict(),
+        quota_heavy=qs.heavy.to_dict() if qs.heavy else None,
+        quota_grok_4_3=qs.grok_4_3.to_dict() if qs.grok_4_3 else None,
+        quota_console=qs.console.to_dict() if qs.console else None,
         usage_use_delta=record.usage_use_count,
         usage_fail_delta=record.usage_fail_count,
         usage_sync_delta=record.usage_sync_count,

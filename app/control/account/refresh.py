@@ -247,7 +247,7 @@ class AccountRefreshService:
             windows = await self._fetch_all_quotas(record.token, record.pool)
         except UpstreamError as exc:
             if await self._expire_invalid_credentials(record, exc):
-                return RefreshResult(checked=1, expired=1, failed=0)
+                return RefreshResult(checked=1, disabled=1, failed=0)
             raise
 
         # API call completely failed — no real data available.

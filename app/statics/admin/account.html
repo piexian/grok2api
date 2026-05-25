@@ -133,8 +133,8 @@
     .stat-grid.mode-random [data-random-only] { display:flex }
     .stat-grid.mode-random [data-stat-card="active"] { order:1 }
     .stat-grid.mode-random [data-stat-card="cooling"] { order:2 }
-    .stat-grid.mode-random [data-stat-card="invalid"] { order:3 }
-    .stat-grid.mode-random [data-stat-card="disabled"] { order:4 }
+    .stat-grid.mode-random [data-stat-card="disabled"] { order:3 }
+    .stat-grid.mode-random [data-stat-card="console"] { order:4 }
     .stat-grid.mode-random [data-stat-card="total"] { order:5 }
     .stat-grid.mode-random [data-stat-card="calls"] { order:6 }
     .stat-grid.mode-random [data-stat-card="success"] { order:7 }
@@ -559,6 +559,7 @@
     .q-e { background:#f7f3fb; color:#8d6bbd }
     .q-h { background:#fff4ed; color:#b0632a }
     .q-b { background:#fdf2f7; color:#be3f7f }
+    .q-c { background:#eef8f7; color:#17847d }
     .q-z { background:#f6f6f6; color:#a0a0a6 }
 
     /* Token monospace */
@@ -768,15 +769,6 @@
       </div>
       <div class="stat-num" id="s-cooling" style="color:#ea580c">0</div>
     </div>
-    <div class="stat-cell" data-stat-card="invalid">
-      <div class="stat-top">
-        <div class="stat-label" data-i18n="account.statInvalid">异常账户</div>
-        <span class="stat-icon" style="color:#dc2626">
-          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="m15 9-6 6m0-6 6 6"/><circle cx="12" cy="12" r="8"/></svg>
-        </span>
-      </div>
-      <div class="stat-num" id="s-invalid" style="color:#dc2626">0</div>
-    </div>
     <div class="stat-cell" data-stat-card="disabled">
       <div class="stat-top">
         <div class="stat-label" data-i18n="account.statDisabled">禁用账户</div>
@@ -849,6 +841,15 @@
       </div>
       <div class="stat-num" id="s-qh" style="color:#b0632a">0</div>
     </div>
+    <div class="stat-cell" data-stat-card="console">
+      <div class="stat-top">
+        <div class="stat-label" data-i18n="account.statConsole">Console 余额</div>
+        <span class="stat-icon" style="color:#17847d">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 19h12"/><path d="M8 16V9"/><path d="M12 16V7"/><path d="M16 16v-5"/></svg>
+        </span>
+      </div>
+      <div class="stat-num" id="s-qc" style="color:#17847d">0</div>
+    </div>
   </div>
 
   <div class="section-head" style="margin-top:40px">
@@ -892,10 +893,6 @@
                 <button type="button" class="filter-chip" data-status="cooling" onclick="switchStatus('cooling')">
                   <span data-i18n="account.filterStatusCooling">限流</span>
                   <span class="filter-chip-count is-orange" id="fc-status-cooling">0</span>
-                </button>
-                <button type="button" class="filter-chip" data-status="invalid" onclick="switchStatus('invalid')">
-                  <span data-i18n="account.filterStatusInvalid">异常</span>
-                  <span class="filter-chip-count is-red" id="fc-status-invalid">0</span>
                 </button>
                 <button type="button" class="filter-chip" data-status="disabled" onclick="switchStatus('disabled')">
                   <span data-i18n="account.filterStatusDisabled">禁用</span>
@@ -978,6 +975,7 @@
               <span class="q-pill q-f">F</span>
               <span class="q-pill q-e">E</span>
               <span class="q-pill q-h">H</span>
+              <span class="q-pill q-c">C</span>
             </span>
           </th>
           <th class="table-center" data-i18n="account.colSuccess">成功</th>
@@ -1199,7 +1197,7 @@ async function load() {
 }
 
 function applyStrategyUI() {
-  // Random strategy: hide quota-related stat cells and the table column.
+  // Random strategy hides model quota cells and the table column; Console stays as an independent summary card.
   const isRandom = selectionStrategy === 'random';
   const statsGrid = document.getElementById('overview-stats');
   if (statsGrid) statsGrid.classList.toggle('mode-random', isRandom);
@@ -1224,7 +1222,6 @@ function getTokenView() {
   const stats = {
     active: 0,
     cooling: 0,
-    invalid: 0,
     disabled: 0,
     calls: globalSuccessCount,
     success: globalSuccessCount,
@@ -1233,8 +1230,9 @@ function getTokenView() {
     qf: 0,
     qe: 0,
     qh: 0,
+    qc: 0,
   };
-  const statusCounts = { all: 0, active: 0, cooling: 0, invalid: 0, disabled: 0 };
+  const statusCounts = { all: 0, active: 0, cooling: 0, disabled: 0 };
   const nsfwCounts = { all: 0, enabled: 0, disabled: 0 };
   const poolCounts = new Map([['all', 0]]);
   const poolsSet = new Set(['basic', 'super', 'heavy']);
@@ -1244,12 +1242,11 @@ function getTokenView() {
     const pool = token.pool || 'basic';
     const quota = token.quota || {};
     const nsfwEnabled = (token.tags || []).includes('nsfw');
-    const invalid = isInvalidStatus(token.status);
     const disabled = isDisabledStatus(token.status);
     const quotaCounts = isQuotaCountedStatus(token.status);
     const matchesPool = curPool === 'all' || pool === curPool;
     const matchesStatus = curStatus === 'all'
-      || (curStatus === 'invalid' ? invalid : curStatus === 'disabled' ? disabled : token.status === curStatus);
+      || (curStatus === 'disabled' ? disabled : token.status === curStatus);
     const matchesNsfw = curNsfw === 'all' || (curNsfw === 'enabled' ? nsfwEnabled : !nsfwEnabled);
 
     poolsSet.add(pool);
@@ -1260,18 +1257,17 @@ function getTokenView() {
       stats.qf += quota.fast?.remaining || 0;
       stats.qe += quota.expert?.remaining || 0;
       stats.qh += quota.heavy?.remaining || 0;
+      stats.qc += quota.console?.remaining || 0;
     }
 
     if (token.status === 'active') stats.active += 1;
     if (token.status === 'cooling') stats.cooling += 1;
-    if (invalid) stats.invalid += 1;
     if (disabled) stats.disabled += 1;
 
     if (matchesPool && matchesNsfw) {
       statusCounts.all += 1;
       if (token.status === 'active') statusCounts.active += 1;
       if (token.status === 'cooling') statusCounts.cooling += 1;
-      if (invalid) statusCounts.invalid += 1;
       if (disabled) statusCounts.disabled += 1;
     }
 
@@ -1311,11 +1307,7 @@ function poolLabel(pool) {
 }
 
 function isDisabledStatus(status) {
-  return status === 'disabled';
-}
-
-function isInvalidStatus(status) {
-  return !['active', 'cooling', 'disabled'].includes(status);
+  return !['active', 'cooling'].includes(status);
 }
 
 function isQuotaCountedStatus(status) {
@@ -1327,12 +1319,11 @@ function renderStats(view = getTokenView()) {
   $('s-total',   allTokens.length);
   $('s-active',  stats.active);
   $('s-cooling', stats.cooling);
-  $('s-invalid', stats.invalid);
   $('s-disabled', stats.disabled);
   $('s-calls', fmt(stats.calls));
   $('s-success', fmt(stats.success));
   $('s-rate', fmtRate(stats.success, stats.fail));
-  $('s-qa', fmt(stats.qa)); $('s-qf', fmt(stats.qf)); $('s-qe', fmt(stats.qe)); $('s-qh', fmt(stats.qh));
+  $('s-qa', fmt(stats.qa)); $('s-qf', fmt(stats.qf)); $('s-qe', fmt(stats.qe)); $('s-qh', fmt(stats.qh)); $('s-qc', fmt(stats.qc));
 }
 
 function renderFilters(view = getTokenView()) {
@@ -1386,7 +1377,6 @@ function renderStatusFilters(view = getTokenView()) {
   setFilterCount('fc-status-all', view.statusCounts.all);
   setFilterCount('fc-status-active', view.statusCounts.active);
   setFilterCount('fc-status-cooling', view.statusCounts.cooling);
-  setFilterCount('fc-status-invalid', view.statusCounts.invalid);
   setFilterCount('fc-status-disabled', view.statusCounts.disabled);
   document.querySelectorAll('[data-status]').forEach(el => el.classList.toggle('active', el.dataset.status === curStatus));
 }
@@ -1423,7 +1413,6 @@ function applyPoolFilter(items, pool = curPool) {
 
 function applyStatusFilter(items, status = curStatus) {
   if (status === 'all') return items;
-  if (status === 'invalid') return items.filter(t => isInvalidStatus(t.status));
   if (status === 'disabled') return items.filter(t => isDisabledStatus(t.status));
   return items.filter(t => t.status === status);
 }
@@ -1465,7 +1454,7 @@ function renderTable(view = getTokenView()) {
 function rowHtml(t) {
   const q      = t.quota || {};
   const isNsfw = (t.tags || []).includes('nsfw');
-  const isDisabled = t.status === 'disabled';
+  const isDisabled = isDisabledStatus(t.status);
   const isRefreshing = refreshingTokens.has(t.token);
   const success = t.use_count || 0;
   const fail = t.fail_count || 0;
@@ -1525,6 +1514,7 @@ function qpills(q) {
     ['expert',   'E', 'q-e', true],
     ['heavy',    'H', 'q-h', true],
     ['grok_4_3', 'B', 'q-b', false],
+    ['console',  'C', 'q-c', false],
   ];
   return modes.map(([m,l,c,showEmpty]) => {
     const win = q[m];
@@ -1533,8 +1523,17 @@ function qpills(q) {
       return `<span class="q-pill q-z" data-tip="${xe(tr(`account.mode.${m}`, null, m))}: 0">${l}:0</span>`;
     }
     const r = win.remaining ?? null;
-    return `<span class="q-pill ${r ? c : 'q-z'}" data-tip="${xe(`${tr(`account.mode.${m}`, null, m)}: ${r ?? tr('account.unknown', null, '未知')}/${win.total ?? '?'}`)}">${l}:${r ?? '?'}</span>`;
+    const source = quotaSourceLabel(win.source);
+    const sourceTip = source ? ` · ${source}` : '';
+    return `<span class="q-pill ${r ? c : 'q-z'}" data-tip="${xe(`${tr(`account.mode.${m}`, null, m)}: ${r ?? tr('account.unknown', null, '未知')}/${win.total ?? '?'}${sourceTip}`)}">${l}:${r ?? '?'}</span>`;
   }).join('');
+}
+
+function quotaSourceLabel(source) {
+  if (source === 1) return tr('account.quotaSource.real', null, '真实同步');
+  if (source === 2) return tr('account.quotaSource.estimated', null, '本地估算');
+  if (source === 0) return tr('account.quotaSource.default', null, '默认值');
+  return '';
 }
 
 // ── Nav & Pagination ────────────────────────────────────────────────────────
@@ -1622,11 +1621,9 @@ function statusBadge(s) {
   const m = {
     active:['badge-active', tr('account.status.active', null, '正常')],
     cooling:['badge-cooling', tr('account.status.cooling', null, '限流')],
-    expired:['badge-expired', tr('account.status.expired', null, '过期')],
     disabled:['badge-disabled', tr('account.status.disabled', null, '禁用')],
-    invalid:['badge-invalid', tr('account.status.invalid', null, '异常')],
   };
-  const [cls, label] = m[s] || ['badge-invalid', s || tr('account.unknown', null, '未知')];
+  const [cls, label] = m[s] || ['badge-disabled', tr('account.status.disabled', null, '禁用')];
   return `<span class="badge ${cls}">${label}</span>`;
 }
 async function copy(t) {

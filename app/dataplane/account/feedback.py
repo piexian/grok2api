@@ -74,7 +74,7 @@ def apply_rate_limited_random(
 
 
 def apply_auth_failure(table: AccountRuntimeTable, idx: int) -> None:
-    """Reduce health on 401; caller may mark account expired."""
+    """Reduce health on 401; caller may disable the account."""
     _adjust_health(table, idx, _AUTH_FACTOR)
 
 

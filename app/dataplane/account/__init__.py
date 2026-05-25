@@ -274,7 +274,7 @@ class AccountDirectory:
             elif kind == FeedbackKind.UNAUTHORIZED:
                 fb.apply_auth_failure(table, idx)
                 fb.update_last_fail(table, idx, ts)
-                fb.apply_status_change(table, idx, int(StatusId.EXPIRED))
+                fb.apply_status_change(table, idx, int(StatusId.DISABLED))
 
             elif kind == FeedbackKind.FORBIDDEN:
                 fb.apply_forbidden(table, idx)

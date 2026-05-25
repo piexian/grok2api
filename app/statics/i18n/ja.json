@@ -159,7 +159,6 @@
     "statTotal": "総アカウント数",
     "statActive": "有効",
     "statCooling": "レート制限中",
-    "statInvalid": "異常",
     "statDisabled": "無効化",
     "statCalls": "総呼び出し数",
     "statSuccessTotal": "成功総数",
@@ -167,13 +166,13 @@
     "statFast": "Fast 残高",
     "statExpert": "Expert 残高",
     "statHeavy": "Heavy 残高",
+    "statConsole": "Console 残高",
     "filterStatusLabel": "状態",
     "filterNsfwLabel": "NSFW",
     "filterTypeLabel": "タイプ",
     "filterStatusAll": "すべて",
     "filterStatusActive": "有効",
     "filterStatusCooling": "レート制限中",
-    "filterStatusInvalid": "異常",
     "filterStatusDisabled": "無効化",
     "filterNsfwAll": "すべて",
     "filterNsfwEnabled": "オン",
@@ -297,7 +296,13 @@
       "fast": "Fast",
       "expert": "Expert",
       "heavy": "Heavy",
-      "grok_4_3": "Grok 4.3 Beta"
+      "grok_4_3": "Grok 4.3 Beta",
+      "console": "Console.x.ai"
+    },
+    "quotaSource": {
+      "default": "既定値",
+      "real": "同期済み",
+      "estimated": "ローカル推定"
     },
     "status": {
       "active": "有効",
