@@ -18,9 +18,26 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok Web capabilities 
 - Anthropic-compatible endpoint: `/v1/messages`
 - Streaming and non-streaming chat, explicit reasoning output, function-tool structure passthrough, and unified token / usage accounting
 - Multi-account pools, tier-aware selection, failure feedback, quota synchronization, and automatic maintenance
+- console.x.ai `/v1/responses` routing for Console models and Web Search through the OpenAI / Anthropic compatible APIs
 - Local image/video caching and locally proxied media URLs
 - Text-to-image, image editing, text-to-video, and image-to-video support
-- Built-in Admin dashboard, Web Chat, Masonry image generation, and ChatKit voice page
+- Built-in Admin dashboard, Web Chat, Masonry image generation, and ChatKit voice page, with standalone Console quota display on the account page
+
+<br>
+
+## 2.0.4.rc6 Highlights
+
+> Major changes since `v2.0.4.rc4`.
+
+- Added console.x.ai routing: `grok-4.3`, `grok-4`, `grok-4.20`, `grok-4.20-reasoning`, `grok-4.20-non-reasoning`, and `grok-4.20-multi-agent` now call `console.x.ai/v1/responses`; basic accounts can use these Console models.
+- Console routing supports streaming / non-streaming responses, image input, function tools, OpenAI Responses events, Anthropic Messages bridging, and automatic `web_search` tool injection.
+- Hybrid reasoning Console models such as `grok-4.3`, `grok-4`, and `grok-4.20` default to `reasoning_effort=high` when the caller omits it; explicit values such as `none`, `minimal`, or `low` override the default.
+- Search source handling was improved: Console single-model and multi-agent results collect both `web_search_call` sources and message annotations into `annotations` / `search_sources`; `features.show_search_sources` controls whether a Sources block is appended to text output.
+- Console quota is tracked independently through a local `console` quota window, defaulting to `30 / 15 minutes`. The Admin account page now shows a standalone Console balance card, row-level `C` quota pills, and source labels for real sync / local estimate / default values.
+- Invalid account handling now auto-disables known unusable credentials such as `invalid-credentials`, `bad-credentials`, missing sessions, revoked tokens, blocked users, and suspended accounts. The previous abnormal-account card/filter was removed, and historical abnormal / expired statuses are folded into disabled accounts.
+- console.x.ai `402` responses are treated as quota exhaustion so account selection can route around depleted Console credits.
+- The WebUI model dropdown is filtered by currently available account tiers to avoid selecting models with no matching account pool.
+- Current prebuilt image: `ghcr.io/piexian/grok2api:2.0.4.rc6`; `ghcr.io/piexian/grok2api:latest` points to the same image.
 
 <br>
 
@@ -108,6 +125,23 @@ cd grok2api
 cp .env.example .env
 docker compose up -d
 ```
+
+### Prebuilt Image
+
+```bash
+docker run -d \
+  --name grok2api \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -v ./logs:/app/logs \
+  --restart unless-stopped \
+  ghcr.io/piexian/grok2api:latest
+```
+
+| Image | Description |
+| :-- | :-- |
+| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to `2.0.4.rc6` |
+| `ghcr.io/piexian/grok2api:2.0.4.rc6` | Fixed version tag |
 
 ### Vercel
 
@@ -242,6 +276,14 @@ Runtime config can also be overridden with `GROK_`-prefixed environment variable
 | `grok-4.20-expert` | `expert` | `super`, prefers higher-tier pools |
 | `grok-4.20-heavy` | `heavy` | `heavy` |
 | `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
+| `grok-4.3` | `console` | `basic`, console.x.ai route |
+| `grok-4` | `console` | `basic`, console.x.ai route |
+| `grok-4.20` | `console` | `basic`, console.x.ai route |
+| `grok-4.20-reasoning` | `console` | `basic`, console.x.ai route |
+| `grok-4.20-non-reasoning` | `console` | `basic`, console.x.ai route |
+| `grok-4.20-multi-agent` | `console` | `basic`, console.x.ai route |
+
+> `console` mode uses `console.x.ai/v1/responses` and accepts the same SSO cookies as grok.com. This path enables `web_search` automatically and uses a dedicated local Console quota window.
 
 ### Image
 

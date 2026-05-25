@@ -19,9 +19,26 @@ Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 
 - Anthropic 兼容接口：`/v1/messages`
 - 支持流式与非流式对话、显式思考输出、函数工具结构透传，以及统一的 token / usage 统计
 - 支持多账号池、层级选号、失败反馈、额度同步与自动维护
+- 支持 console.x.ai `/v1/responses` 路由，可通过 OpenAI / Anthropic 兼容接口调用 Console 模型与 Web Search
 - 支持本地缓存图片、视频与本地代理链接返回
 - 支持文生图、图像编辑、文生视频、图生视频
-- 内置 Admin 后台管理、Web Chat、Masonry 生图、ChatKit 语音页面
+- 内置 Admin 后台管理、Web Chat、Masonry 生图、ChatKit 语音页面，账号页支持 Console 额度独立展示
+
+<br>
+
+## 2.0.4.rc6 更新重点
+
+> 以下为 `v2.0.4.rc4` 之后到当前版本的主要变化摘要。
+
+- 新增 console.x.ai 路由：`grok-4.3`、`grok-4`、`grok-4.20`、`grok-4.20-reasoning`、`grok-4.20-non-reasoning`、`grok-4.20-multi-agent` 通过 `console.x.ai/v1/responses` 调用，basic 账号即可使用。
+- Console 路由支持流式 / 非流式、图片输入、函数工具、OpenAI Responses 事件、Anthropic Messages 转接，以及自动注入 `web_search` 工具。
+- `grok-4.3`、`grok-4`、`grok-4.20` 这类混合思考模型在未显式传入 `reasoning_effort` 时默认使用 `high`；显式传入 `none`、`minimal`、`low` 等值会覆盖默认。
+- 搜索来源增强：Console 单模型与 multi-agent 返回中的 `web_search_call`、message annotations 都会汇总为 `annotations` / `search_sources`；`features.show_search_sources` 可控制是否在文本尾部追加 Sources。
+- Console 额度独立维护：新增 `console` mode 本地额度窗口（默认 `30 / 15 分钟`），Admin 账号页显示独立 Console 余额卡片，账号明细显示 `C` 额度 pill，并标注真实同步 / 本地估算 / 默认值来源。
+- 账号异常处理调整：`invalid-credentials`、`bad-credentials`、session 失效、账号封禁等明确不可用状态会自动禁用账号；后台取消“异常账户”卡片与筛选，历史异常 / 过期状态统一并入“禁用账户”。
+- console.x.ai 返回 `402` 时按额度耗尽处理，账号池会临时绕开该账号，避免持续命中已耗尽的 Console 余额。
+- WebUI 模型下拉框会按当前账号池等级过滤，减少选择到无可用账号层级模型后的失败。
+- 当前预构建镜像：`ghcr.io/piexian/grok2api:2.0.4.rc6`；`ghcr.io/piexian/grok2api:latest` 已指向同一镜像。
 
 <br>
 
@@ -109,6 +126,23 @@ cd grok2api
 cp .env.example .env
 docker compose up -d
 ```
+
+### 预构建镜像
+
+```bash
+docker run -d \
+  --name grok2api \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -v ./logs:/app/logs \
+  --restart unless-stopped \
+  ghcr.io/piexian/grok2api:latest
+```
+
+| 镜像 | 说明 |
+| :-- | :-- |
+| `ghcr.io/piexian/grok2api:latest` | 当前 latest，已指向 `2.0.4.rc6` |
+| `ghcr.io/piexian/grok2api:2.0.4.rc6` | 固定版本标签 |
 
 ### Vercel
 
@@ -243,6 +277,14 @@ docker compose up -d
 | `grok-4.20-expert` | `expert` | `super`，优先使用高等级账号池 |
 | `grok-4.20-heavy` | `heavy` | `heavy` |
 | `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
+| `grok-4.3` | `console` | `basic`，console.x.ai 路由 |
+| `grok-4` | `console` | `basic`，console.x.ai 路由 |
+| `grok-4.20` | `console` | `basic`，console.x.ai 路由 |
+| `grok-4.20-reasoning` | `console` | `basic`，console.x.ai 路由 |
+| `grok-4.20-non-reasoning` | `console` | `basic`，console.x.ai 路由 |
+| `grok-4.20-multi-agent` | `console` | `basic`，console.x.ai 路由 |
+
+> `console` mode 使用 `console.x.ai/v1/responses`，与 grok.com SSO Cookie 兼容。该路径会自动启用 `web_search`，并使用独立的 Console 本地额度窗口。
 
 ### Image
 
