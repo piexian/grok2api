@@ -76,6 +76,8 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(console.total, 30)
         self.assertEqual(console.window_seconds, 900)
         self.assertEqual(resolve("grok-4.3").mode_id, ModeId.CONSOLE)
+        self.assertEqual(resolve("grok-build-0.1").mode_id, ModeId.CONSOLE)
+        self.assertEqual(resolve("grok-build-0.1").console_model, "grok-build-0.1")
 
     async def test_local_repo_directory_console_quota(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,5 +221,6 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 ids = {item["id"] for item in json.loads(body)["data"]}
                 self.assertIn("grok-4.3", ids)
                 self.assertIn("grok-4.20", ids)
+                self.assertIn("grok-build-0.1", ids)
             finally:
                 await repo.close()

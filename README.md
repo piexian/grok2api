@@ -30,7 +30,7 @@ Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 
 
 > 以下为 `v2.0.4.rc4` 之后到当前版本的主要变化摘要。
 
-- 新增 console.x.ai 路由：`grok-4.3`、`grok-4`、`grok-4.20`、`grok-4.20-reasoning`、`grok-4.20-non-reasoning`、`grok-4.20-multi-agent` 通过 `console.x.ai/v1/responses` 调用，basic 账号即可使用。
+- 新增 console.x.ai 路由：`grok-4.3`、`grok-4`、`grok-4.20`、`grok-4.20-reasoning`、`grok-4.20-non-reasoning`、`grok-4.20-multi-agent`、`grok-build-0.1` 通过 `console.x.ai/v1/responses` 调用，basic 账号即可使用。
 - Console 路由支持流式 / 非流式、图片输入、函数工具、OpenAI Responses 事件、Anthropic Messages 转接，以及自动注入 `web_search` 工具。
 - `grok-4.3`、`grok-4`、`grok-4.20` 这类混合思考模型在未显式传入 `reasoning_effort` 时默认使用 `high`；显式传入 `none`、`minimal`、`low` 等值会覆盖默认。
 - 搜索来源增强：Console 单模型与 multi-agent 返回中的 `web_search_call`、message annotations 都会汇总为 `annotations` / `search_sources`；`features.show_search_sources` 可控制是否在文本尾部追加 Sources。
@@ -283,6 +283,7 @@ docker run -d \
 | `grok-4.20-reasoning` | `console` | `basic`，console.x.ai 路由 |
 | `grok-4.20-non-reasoning` | `console` | `basic`，console.x.ai 路由 |
 | `grok-4.20-multi-agent` | `console` | `basic`，console.x.ai 路由 |
+| `grok-build-0.1` | `console` | `basic`，console.x.ai 路由 |
 
 > `console` mode 使用 `console.x.ai/v1/responses`，与 grok.com SSO Cookie 兼容。该路径会自动启用 `web_search`，并使用独立的 Console 本地额度窗口。
 

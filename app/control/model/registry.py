@@ -52,6 +52,7 @@ MODELS: tuple[ModelSpec, ...] = (
     # Multi-agent — left default; effort behaviour with this variant has not
     # been verified, so we don't auto-inject "high" to avoid surprising 400s.
     ModelSpec("grok-4.20-multi-agent",                  ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Multi-Agent (Console)",       console_model="grok-4.20-multi-agent-0309"),
+    ModelSpec("grok-build-0.1",                         ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok Build 0.1 (Console)",              console_model="grok-build-0.1"),
 
     # === Image ==============================================================
 

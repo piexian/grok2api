@@ -29,7 +29,7 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok Web capabilities 
 
 > Major changes since `v2.0.4.rc4`.
 
-- Added console.x.ai routing: `grok-4.3`, `grok-4`, `grok-4.20`, `grok-4.20-reasoning`, `grok-4.20-non-reasoning`, and `grok-4.20-multi-agent` now call `console.x.ai/v1/responses`; basic accounts can use these Console models.
+- Added console.x.ai routing: `grok-4.3`, `grok-4`, `grok-4.20`, `grok-4.20-reasoning`, `grok-4.20-non-reasoning`, `grok-4.20-multi-agent`, and `grok-build-0.1` now call `console.x.ai/v1/responses`; basic accounts can use these Console models.
 - Console routing supports streaming / non-streaming responses, image input, function tools, OpenAI Responses events, Anthropic Messages bridging, and automatic `web_search` tool injection.
 - Hybrid reasoning Console models such as `grok-4.3`, `grok-4`, and `grok-4.20` default to `reasoning_effort=high` when the caller omits it; explicit values such as `none`, `minimal`, or `low` override the default.
 - Search source handling was improved: Console single-model and multi-agent results collect both `web_search_call` sources and message annotations into `annotations` / `search_sources`; `features.show_search_sources` controls whether a Sources block is appended to text output.
@@ -282,6 +282,7 @@ Runtime config can also be overridden with `GROK_`-prefixed environment variable
 | `grok-4.20-reasoning` | `console` | `basic`, console.x.ai route |
 | `grok-4.20-non-reasoning` | `console` | `basic`, console.x.ai route |
 | `grok-4.20-multi-agent` | `console` | `basic`, console.x.ai route |
+| `grok-build-0.1` | `console` | `basic`, console.x.ai route |
 
 > `console` mode uses `console.x.ai/v1/responses` and accepts the same SSO cookies as grok.com. This path enables `web_search` automatically and uses a dedicated local Console quota window.
 
