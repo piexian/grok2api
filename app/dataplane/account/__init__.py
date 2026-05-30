@@ -286,7 +286,11 @@ class AccountDirectory:
 
             # Quota strategy may receive authoritative quota data from upstream
             # response headers; the random strategy ignores this entirely.
-            if strategy == "quota" and remaining is not None and reset_at_ms is not None:
+            if (
+                strategy == "quota"
+                and remaining is not None
+                and reset_at_ms is not None
+            ):
                 reset_s = int(reset_at_ms // 1000)
                 fb.apply_quota_update(table, idx, mode_id, remaining, reset_s)
 
@@ -304,6 +308,26 @@ class AccountDirectory:
     @property
     def revision(self) -> int:
         return self._table.revision if self._table else 0
+
+    def stats_snapshot(self) -> dict | None:
+        """Return aggregate counts from the in-memory table (O(n), no DB).
+
+        Returns ``None`` if the table is not yet bootstrapped. The table
+        reference is read once (atomic replace guarantees a consistent view).
+        """
+        table = self._table
+        if table is None:
+            return None
+        counts = table.count_by_pool_status()
+        return {
+            "total": counts["total"],
+            "active": counts["active"],
+            "cooling": counts["cooling"],
+            "disabled": counts["disabled"],
+            "by_pool": counts["by_pool"],
+            "quota": table.quota_totals(),
+            "revision": table.revision,
+        }
 
     async def _increment_global_success_count(self) -> None:
         try:

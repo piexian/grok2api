@@ -14,9 +14,9 @@ class AccountUpsert(BaseModel):
     """
 
     token: str
-    pool:  str = "basic"
-    tags:  list[str] = Field(default_factory=list)
-    ext:   dict[str, Any] = Field(default_factory=dict)
+    pool: str = "basic"
+    tags: list[str] = Field(default_factory=list)
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountPatch(BaseModel):
@@ -25,51 +25,52 @@ class AccountPatch(BaseModel):
     Fields left as ``None`` are **not** modified in the backend.
     """
 
-    token:            str
-    pool:             str | None             = None  # update pool type when inferred
-    status:           AccountStatus | None   = None
-    tags:             list[str] | None       = None
-    add_tags:         list[str] | None       = None
-    remove_tags:      list[str] | None       = None
+    token: str
+    pool: str | None = None  # update pool type when inferred
+    status: AccountStatus | None = None
+    tags: list[str] | None = None
+    add_tags: list[str] | None = None
+    remove_tags: list[str] | None = None
     # Per-mode quota patches (raw dicts matching QuotaWindow.to_dict()).
-    quota_auto:       dict[str, Any] | None  = None
-    quota_fast:       dict[str, Any] | None  = None
-    quota_expert:     dict[str, Any] | None  = None
-    quota_heavy:      dict[str, Any] | None  = None
-    quota_grok_4_3:   dict[str, Any] | None  = None
-    quota_console:    dict[str, Any] | None  = None
+    quota_auto: dict[str, Any] | None = None
+    quota_fast: dict[str, Any] | None = None
+    quota_expert: dict[str, Any] | None = None
+    quota_heavy: dict[str, Any] | None = None
+    quota_grok_4_3: dict[str, Any] | None = None
+    quota_console: dict[str, Any] | None = None
     # Usage counters — delta values (added to existing counts).
-    usage_use_delta:  int | None             = None
-    usage_fail_delta: int | None             = None
-    usage_sync_delta: int | None             = None
+    usage_use_delta: int | None = None
+    usage_fail_delta: int | None = None
+    usage_sync_delta: int | None = None
     # Timestamp overrides (set absolute values).
-    last_use_at:      int | None             = None
-    last_fail_at:     int | None             = None
-    last_fail_reason: str | None             = None
-    last_sync_at:     int | None             = None
-    last_clear_at:    int | None             = None
-    state_reason:     str | None             = None
-    ext_merge:        dict[str, Any] | None  = None
-    clear_failures:   bool                   = False
+    last_use_at: int | None = None
+    last_fail_at: int | None = None
+    last_fail_reason: str | None = None
+    last_sync_at: int | None = None
+    last_clear_at: int | None = None
+    state_reason: str | None = None
+    ext_merge: dict[str, Any] | None = None
+    clear_failures: bool = False
 
 
 class ListAccountsQuery(BaseModel):
     """Query parameters for paginated account listing."""
 
-    page:            int            = Field(default=1, ge=1)
-    page_size:       int            = Field(default=50, ge=1, le=2000)
-    pool:            str | None     = None
-    status:          AccountStatus | None = None
-    tags:            list[str]      = Field(default_factory=list)
-    include_deleted: bool           = False
-    sort_by:         str            = "updated_at"   # field name
-    sort_desc:       bool           = True
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=2000)
+    pool: str | None = None
+    status: AccountStatus | None = None
+    tags: list[str] = Field(default_factory=list)  # must contain ALL
+    exclude_tags: list[str] = Field(default_factory=list)  # must contain NONE
+    include_deleted: bool = False
+    sort_by: str = "updated_at"  # field name
+    sort_desc: bool = True
 
 
 class BulkReplacePoolCommand(BaseModel):
     """Replace all accounts in a pool atomically."""
 
-    pool:    str
+    pool: str
     upserts: list[AccountUpsert] = Field(default_factory=list)
 
 

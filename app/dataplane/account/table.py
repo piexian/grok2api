@@ -12,7 +12,7 @@ import array
 from dataclasses import dataclass, field
 from typing import Iterator
 
-from ..shared.enums import ALL_MODE_IDS, StatusId
+from ..shared.enums import ALL_MODE_IDS, POOL_ID_TO_STR, StatusId
 
 # ---------------------------------------------------------------------------
 # Column type codes
@@ -57,11 +57,11 @@ class AccountRuntimeTable:
     """
 
     # --- Identity ---
-    token_by_idx: list[str]      = field(default_factory=list)
+    token_by_idx: list[str] = field(default_factory=list)
     idx_by_token: dict[str, int] = field(default_factory=dict)
 
     # --- Pool / status (uint8) ---
-    pool_by_idx:   "array.array[int]" = field(default_factory=lambda: array.array("B"))
+    pool_by_idx: "array.array[int]" = field(default_factory=lambda: array.array("B"))
     status_by_idx: "array.array[int]" = field(default_factory=lambda: array.array("B"))
 
     # --- Quota remaining per mode (int16; -1 = unknown) ---
@@ -178,7 +178,7 @@ class AccountRuntimeTable:
 
     # --- Metadata ---
     revision: int = 0
-    size:     int = 0   # number of live (non-deleted) slots
+    size: int = 0  # number of live (non-deleted) slots
 
     # ---------------------------------------------------------------------------
     # Internal helpers
@@ -237,7 +237,7 @@ class AccountRuntimeTable:
         return self.window_console_by_idx
 
     def _add_to_indexes(self, idx: int) -> None:
-        pool_id   = int(self.pool_by_idx[idx])
+        pool_id = int(self.pool_by_idx[idx])
         status_id = int(self.status_by_idx[idx])
         if status_id != int(StatusId.ACTIVE):
             return
@@ -268,38 +268,38 @@ class AccountRuntimeTable:
 
     def _append_slot(
         self,
-        token:           str,
-        pool_id:         int,
-        status_id:       int,
-        quota_auto:      int,
-        quota_fast:      int,
-        quota_expert:    int,
-        quota_heavy:     int,
-        quota_grok_4_3:  int,
-        quota_console:   int,
-        total_auto:      int,
-        total_fast:      int,
-        total_expert:    int,
-        total_heavy:     int,
-        total_grok_4_3:  int,
-        total_console:   int,
-        window_auto:     int,
-        window_fast:     int,
-        window_expert:   int,
-        window_heavy:    int,
+        token: str,
+        pool_id: int,
+        status_id: int,
+        quota_auto: int,
+        quota_fast: int,
+        quota_expert: int,
+        quota_heavy: int,
+        quota_grok_4_3: int,
+        quota_console: int,
+        total_auto: int,
+        total_fast: int,
+        total_expert: int,
+        total_heavy: int,
+        total_grok_4_3: int,
+        total_console: int,
+        window_auto: int,
+        window_fast: int,
+        window_expert: int,
+        window_heavy: int,
         window_grok_4_3: int,
-        window_console:  int,
-        reset_auto:      int,
-        reset_fast:      int,
-        reset_expert:    int,
-        reset_heavy:     int,
-        reset_grok_4_3:  int,
-        reset_console:   int,
-        health:          float,
-        last_use_s:      int,
-        last_fail_s:     int,
-        fail_count:      int,
-        tags:            list[str],
+        window_console: int,
+        reset_auto: int,
+        reset_fast: int,
+        reset_expert: int,
+        reset_heavy: int,
+        reset_grok_4_3: int,
+        reset_console: int,
+        health: float,
+        last_use_s: int,
+        last_fail_s: int,
+        fail_count: int,
+        tags: list[str],
     ) -> int:
         idx = len(self.token_by_idx)
         self.token_by_idx.append(token)
@@ -438,6 +438,70 @@ class AccountRuntimeTable:
         for idx in range(len(self.token_by_idx)):
             if int(self.status_by_idx[idx]) != int(StatusId.DELETED):
                 yield idx
+
+    # ---------------------------------------------------------------------------
+    # Aggregate statistics (admin display — O(n) single-pass column scans)
+    # ---------------------------------------------------------------------------
+
+    def count_by_pool_status(self) -> dict:
+        """Count live accounts by pool and by effective status group.
+
+        Returns ``{"total": n, "active": n, "cooling": n, "disabled": n,
+        "by_pool": {pool_name: {"active": n, "cooling": n, "disabled": n,
+        "total": n}}}``. ``disabled`` aggregates every non-active/non-cooling
+        status (expired + disabled), matching the admin UI's grouping.
+        """
+        active = cooling = disabled = total = 0
+        by_pool: dict[str, dict[str, int]] = {}
+        active_id = int(StatusId.ACTIVE)
+        cooling_id = int(StatusId.COOLING)
+        for idx in self.iter_live_indices():
+            total += 1
+            status_id = int(self.status_by_idx[idx])
+            pool_name = POOL_ID_TO_STR.get(int(self.pool_by_idx[idx]), "basic")
+            bucket = by_pool.setdefault(
+                pool_name, {"active": 0, "cooling": 0, "disabled": 0, "total": 0}
+            )
+            bucket["total"] += 1
+            if status_id == active_id:
+                active += 1
+                bucket["active"] += 1
+            elif status_id == cooling_id:
+                cooling += 1
+                bucket["cooling"] += 1
+            else:
+                disabled += 1
+                bucket["disabled"] += 1
+        return {
+            "total": total,
+            "active": active,
+            "cooling": cooling,
+            "disabled": disabled,
+            "by_pool": by_pool,
+        }
+
+    def quota_totals(self) -> dict:
+        """Sum remaining quota across all live accounts, per mode.
+
+        Returns ``{"auto": n, "fast": n, "expert": n, "heavy": n,
+        "grok_4_3": n, "console": n}``. Negative values (-1 = unknown) are
+        treated as 0.
+        """
+        cols = {
+            "auto": self.quota_auto_by_idx,
+            "fast": self.quota_fast_by_idx,
+            "expert": self.quota_expert_by_idx,
+            "heavy": self.quota_heavy_by_idx,
+            "grok_4_3": self.quota_grok_4_3_by_idx,
+            "console": self.quota_console_by_idx,
+        }
+        totals = {mode: 0 for mode in cols}
+        for idx in self.iter_live_indices():
+            for mode, col in cols.items():
+                v = int(col[idx])
+                if v > 0:
+                    totals[mode] += v
+        return totals
 
 
 def make_empty_table() -> AccountRuntimeTable:

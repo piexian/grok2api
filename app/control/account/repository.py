@@ -2,7 +2,12 @@
 
 from typing import Protocol, runtime_checkable
 
-from .commands import AccountPatch, AccountUpsert, BulkReplacePoolCommand, ListAccountsQuery
+from .commands import (
+    AccountPatch,
+    AccountUpsert,
+    BulkReplacePoolCommand,
+    ListAccountsQuery,
+)
 from .models import (
     AccountChangeSet,
     AccountMutationResult,
@@ -30,6 +35,14 @@ class AccountRepository(Protocol):
 
     async def increment_global_success_count(self, delta: int = 1) -> int:
         """Increment and return the cumulative successful-call count."""
+        ...
+
+    async def aggregate_usage(self) -> dict[str, int]:
+        """Return summed usage counters across all non-deleted accounts.
+
+        Returns ``{"use_count": int, "fail_count": int}``. Backed by a single
+        aggregate query (SQL ``SUM``) — does not load records into memory.
+        """
         ...
 
     async def runtime_snapshot(self) -> RuntimeSnapshot:

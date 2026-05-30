@@ -247,6 +247,53 @@ async def runtime_status():
     )
 
 
+@router.get("/stats", tags=[_TAG_ADMIN_SYSTEM])
+async def account_stats(repo: "AccountRepository" = Depends(get_repo)):
+    """Aggregate dashboard stats — in-memory counts + one SUM query.
+
+    Structural counts (total / per-pool / per-status / quota sums) come from
+    the columnar runtime table (O(n), no DB hit). Cumulative call counters
+    come from a single aggregate query, and the global success counter from
+    its dedicated meta row.
+    """
+    from app.dataplane.account import _directory
+
+    if _directory is None:
+        raise AppError(
+            "Account directory not initialised",
+            kind=ErrorKind.SERVER,
+            code="directory_not_initialised",
+            status=503,
+        )
+    snap = _directory.stats_snapshot()
+    if snap is None:
+        raise AppError(
+            "Account directory not initialised",
+            kind=ErrorKind.SERVER,
+            code="directory_not_initialised",
+            status=503,
+        )
+    usage = await repo.aggregate_usage()
+    success = await repo.get_global_success_count()
+    return Response(
+        content=orjson.dumps(
+            {
+                "total": snap["total"],
+                "active": snap["active"],
+                "cooling": snap["cooling"],
+                "disabled": snap["disabled"],
+                "by_pool": snap["by_pool"],
+                "quota": snap["quota"],
+                "calls": usage["use_count"],
+                "fail": usage["fail_count"],
+                "success": success,
+                "revision": snap["revision"],
+            }
+        ),
+        media_type="application/json",
+    )
+
+
 @router.post("/sync", tags=[_TAG_ADMIN_SYSTEM])
 async def force_sync():
     from app.dataplane.account import _directory
