@@ -61,6 +61,7 @@ class RedisAccountRepository:
     def _to_hash(record: AccountRecord, revision: int) -> dict[str, str]:
         qs = record.quota_set()
         return {
+            "account_id": record.account_id or "",
             "pool": record.pool,
             "status": record.status.value,
             "created_at": str(record.created_at),
@@ -98,9 +99,11 @@ class RedisAccountRepository:
             v = _s(k)
             return int(v) if v else None
 
+        aid = _s("account_id")
         return AccountRecord.model_validate(
             {
                 "token": token,
+                "account_id": aid if aid else None,
                 "pool": _s("pool") or "basic",
                 "status": _s("status") or "active",
                 "created_at": _i("created_at") or now_ms(),
@@ -264,8 +267,52 @@ class RedisAccountRepository:
             )
             qs = default_quota_set(pool)
             ts = now_ms()
+            account_id = item.account_id or None
+
+            key = _record_key(token)
+            # Preserve an account_id discovered earlier (via subscription patch)
+            # when this upsert omits it (e.g. token edit/replace), so dedup keeps
+            # working instead of being reset to empty.
+            if account_id is None:
+                existing_aid = await self._r.hget(key, "account_id")
+                if existing_aid:
+                    if isinstance(existing_aid, bytes):
+                        existing_aid = existing_aid.decode()
+                    account_id = existing_aid or None
+            if account_id:
+                async for key in self._r.scan_iter("accounts:record:*"):
+                    h = await self._r.hgetall(key)
+                    if not h:
+                        continue
+                    existing_aid = h.get(b"account_id") or h.get("account_id") or b""
+                    if isinstance(existing_aid, bytes):
+                        existing_aid = existing_aid.decode()
+                    if existing_aid == account_id:
+                        dup_token = (
+                            key.decode() if isinstance(key, bytes) else key
+                        ).split(":", 2)[-1]
+                        if dup_token != token:
+                            await self._r.hset(
+                                key,
+                                mapping={
+                                    "deleted_at": str(ts),
+                                    "updated_at": str(ts),
+                                    "revision": str(rev),
+                                },
+                            )
+                            # Remove from pool set and record the soft-delete in
+                            # the revision log so scan_changes() propagates it to
+                            # the runtime table (otherwise routing keeps the dup
+                            # until a full bootstrap).
+                            dup_pool = h.get(b"pool") or h.get("pool") or b"basic"
+                            if isinstance(dup_pool, bytes):
+                                dup_pool = dup_pool.decode()
+                            await self._r.srem(_pool_key(dup_pool), dup_token)
+                            await self._r.zadd(_KEY_REV_LOG, {dup_token: rev})
+
             record = AccountRecord(
                 token=token,
+                account_id=account_id,
                 pool=pool,
                 tags=item.tags,
                 ext=item.ext,
@@ -313,6 +360,8 @@ class RedisAccountRepository:
                 updates["last_sync_at"] = str(patch.last_sync_at)
             if patch.last_clear_at is not None:
                 updates["last_clear_at"] = str(patch.last_clear_at)
+            if patch.account_id is not None:
+                updates["account_id"] = patch.account_id
             if patch.pool is not None:
                 updates["pool"] = patch.pool
             if patch.quota_auto is not None:
@@ -378,6 +427,45 @@ class RedisAccountRepository:
 
             await self._r.hset(key, mapping=updates)
             await self._r.zadd(_KEY_REV_LOG, {patch.token: rev})
+            # Pool change must move the token between pool sets, else the stale
+            # membership lets a later pool replace soft-delete an upgraded token.
+            if patch.pool is not None and patch.pool != record.pool:
+                await self._r.srem(_pool_key(record.pool), patch.token)
+                await self._r.sadd(_pool_key(patch.pool), patch.token)
+            # Dedup: a patch assigning an account_id (subscription API on the
+            # normal import path) soft-deletes any other live token sharing that
+            # xaiUserId, keeping one canonical token per account.
+            if patch.account_id:
+                async for dkey in self._r.scan_iter("accounts:record:*"):
+                    dh = await self._r.hgetall(dkey)
+                    if not dh:
+                        continue
+                    daid = dh.get(b"account_id") or dh.get("account_id") or b""
+                    if isinstance(daid, bytes):
+                        daid = daid.decode()
+                    ddel = dh.get(b"deleted_at") or dh.get("deleted_at") or b""
+                    if isinstance(ddel, bytes):
+                        ddel = ddel.decode()
+                    if daid != patch.account_id or ddel:
+                        continue
+                    dup_token = (
+                        dkey.decode() if isinstance(dkey, bytes) else dkey
+                    ).split(":", 2)[-1]
+                    if dup_token == patch.token:
+                        continue
+                    await self._r.hset(
+                        dkey,
+                        mapping={
+                            "deleted_at": str(ts),
+                            "updated_at": str(ts),
+                            "revision": str(rev),
+                        },
+                    )
+                    dpool = dh.get(b"pool") or dh.get("pool") or b"basic"
+                    if isinstance(dpool, bytes):
+                        dpool = dpool.decode()
+                    await self._r.srem(_pool_key(dpool), dup_token)
+                    await self._r.zadd(_KEY_REV_LOG, {dup_token: rev})
             count += 1
         return AccountMutationResult(patched=count, revision=rev)
 

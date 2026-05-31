@@ -16,6 +16,7 @@ import asyncio
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from app.platform.logging.logger import logger
 from app.platform.runtime.clock import now_ms
 from ..commands import (
     AccountPatch,
@@ -44,6 +45,7 @@ accounts_table = sa.Table(
     _TBL_ACCOUNTS,
     metadata,
     sa.Column("token", sa.String(512), primary_key=True),
+    sa.Column("account_id", sa.String(64), nullable=True, index=True),  # xaiUserId UUID for dedup
     sa.Column("pool", sa.Text, nullable=False, default="basic"),
     sa.Column("status", sa.Text, nullable=False, default="active"),
     sa.Column("created_at", sa.BigInteger, nullable=False),
@@ -445,6 +447,8 @@ def _evict_cached_engine(engine: AsyncEngine) -> None:
 
 def _row_to_record(row: Any) -> AccountRecord:
     d = dict(row._mapping)
+    # Normalise account_id — stored as string, can be empty.
+    d["account_id"] = d.get("account_id") or None
     d["tags"] = json.loads(d.get("tags") or "[]")
     heavy_raw = d.pop("quota_heavy", "{}") or "{}"
     grok_4_3_raw = d.pop("quota_grok_4_3", "{}") or "{}"
@@ -519,14 +523,23 @@ class SqlAccountRepository:
     # ------------------------------------------------------------------
 
     def _build_upsert(self, row: dict[str, Any]):
+        # account_id is discovered asynchronously via the subscription API and
+        # written by patch; a later upsert that omits it (token edit/replace)
+        # must NOT clobber the stored value, so COALESCE the incoming NULL.
         if self._dialect == "postgresql":
             from sqlalchemy.dialects.postgresql import insert
 
             stmt = insert(accounts_table).values(**row)
-            # On conflict, update all columns except token and created_at.
-            update_cols = {
-                k: stmt.excluded[k] for k in row if k not in ("token", "created_at")
-            }
+            update_cols = {}
+            for k in row:
+                if k in ("token", "created_at"):
+                    continue
+                if k == "account_id":
+                    update_cols[k] = sa.func.coalesce(
+                        stmt.excluded[k], accounts_table.c.account_id
+                    )
+                else:
+                    update_cols[k] = stmt.excluded[k]
             return stmt.on_conflict_do_update(
                 index_elements=["token"], set_=update_cols
             )
@@ -535,9 +548,16 @@ class SqlAccountRepository:
             from sqlalchemy.dialects.mysql import insert
 
             stmt = insert(accounts_table).values(**row)
-            update_cols = {
-                k: stmt.inserted[k] for k in row if k not in ("token", "created_at")
-            }
+            update_cols = {}
+            for k in row:
+                if k in ("token", "created_at"):
+                    continue
+                if k == "account_id":
+                    update_cols[k] = sa.func.coalesce(
+                        stmt.inserted[k], accounts_table.c.account_id
+                    )
+                else:
+                    update_cols[k] = stmt.inserted[k]
             return stmt.on_duplicate_key_update(**update_cols)
 
     # ------------------------------------------------------------------
@@ -586,6 +606,23 @@ class SqlAccountRepository:
     async def _ensure_columns(self, conn: Any) -> None:
         """Idempotent ALTER TABLE migrations for columns added after the initial schema."""
         existing = await self._table_columns(conn, _TBL_ACCOUNTS)
+        if "account_id" not in existing:
+            if self._dialect == "mysql":
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {_TBL_ACCOUNTS} "
+                    f"ADD COLUMN account_id VARCHAR(64) NULL"
+                )
+                await conn.exec_driver_sql(
+                    f"CREATE INDEX idx_accounts_account_id ON {_TBL_ACCOUNTS} (account_id)"
+                )
+            else:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE {_TBL_ACCOUNTS} "
+                    f"ADD COLUMN account_id VARCHAR(64)"
+                )
+                await conn.exec_driver_sql(
+                    f"CREATE INDEX idx_accounts_account_id ON {_TBL_ACCOUNTS} (account_id)"
+                )
         if "quota_grok_4_3" not in existing:
             if self._dialect == "mysql":
                 # MySQL forbids DEFAULT values on TEXT/BLOB columns;
@@ -801,8 +838,21 @@ class SqlAccountRepository:
                     else "basic"
                 )
                 qs = default_quota_set(pool)
+                account_id = item.account_id or None
+                if account_id is None:
+                    # Re-add / replace paths omit account_id; read back the
+                    # stored id so dedup still runs (and COALESCE keeps it).
+                    existing_aid = (
+                        await conn.execute(
+                            sa.select(accounts_table.c.account_id).where(
+                                accounts_table.c.token == token
+                            )
+                        )
+                    ).scalar()
+                    account_id = existing_aid or None
                 row = {
                     "token": token,
+                    "account_id": account_id,
                     "pool": pool,
                     "status": "active",
                     "created_at": ts,
@@ -825,6 +875,29 @@ class SqlAccountRepository:
                     "ext": json.dumps(item.ext),
                     "revision": rev,
                 }
+                # Dedup by account_id: if this account_id already exists under a
+                # *different* token, soft-delete the old token record so we
+                # maintain one canonical token per xaiUserId.
+                if account_id:
+                    existing = (await conn.execute(
+                        sa.select(accounts_table.c.token).where(
+                            accounts_table.c.account_id == account_id,
+                            accounts_table.c.token != token,
+                            accounts_table.c.deleted_at.is_(None),
+                        )
+                    )).fetchall()
+                    for dup in existing:
+                        dup_token = dup[0]
+                        await conn.execute(
+                            accounts_table.update()
+                            .where(accounts_table.c.token == dup_token)
+                            .values(deleted_at=ts, updated_at=ts, revision=rev)
+                        )
+                        logger.info(
+                            "account deduplicated by account_id: old_token={}... new_token={}... account_id={}",
+                            dup_token[:10], token[:10], account_id,
+                        )
+
                 await conn.execute(self._build_upsert(row))
                 count += 1
             return AccountMutationResult(upserted=count, revision=rev)
@@ -853,6 +926,8 @@ class SqlAccountRepository:
                 record = _row_to_record(row)
 
                 updates: dict[str, Any] = {"updated_at": ts, "revision": rev}
+                if patch.account_id is not None:
+                    updates["account_id"] = patch.account_id
                 if patch.pool is not None:
                     updates["pool"] = patch.pool
                 if patch.status is not None:
@@ -931,6 +1006,33 @@ class SqlAccountRepository:
                     .where(accounts_table.c.token == patch.token)
                     .values(**updates)
                 )
+                # Dedup: when a patch assigns an account_id (typically from the
+                # subscription API on the normal import path), soft-delete any
+                # other live token sharing that xaiUserId so there is one
+                # canonical token per account.
+                if patch.account_id:
+                    dups = (
+                        await conn.execute(
+                            sa.select(accounts_table.c.token).where(
+                                accounts_table.c.account_id == patch.account_id,
+                                accounts_table.c.token != patch.token,
+                                accounts_table.c.deleted_at.is_(None),
+                            )
+                        )
+                    ).fetchall()
+                    for dup in dups:
+                        await conn.execute(
+                            accounts_table.update()
+                            .where(accounts_table.c.token == dup[0])
+                            .values(deleted_at=ts, updated_at=ts, revision=rev)
+                        )
+                        logger.info(
+                            "account deduplicated by account_id (patch): "
+                            "old_token={}... new_token={}... account_id={}",
+                            dup[0][:10],
+                            patch.token[:10],
+                            patch.account_id,
+                        )
                 count += 1
             return AccountMutationResult(patched=count, revision=rev)
 
