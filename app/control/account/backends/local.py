@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from app.platform.runtime.clock import now_ms
-from ..commands import AccountPatch, AccountUpsert, BulkReplacePoolCommand, ListAccountsQuery
+from ..commands import (
+    AccountPatch,
+    AccountUpsert,
+    BulkReplacePoolCommand,
+    ListAccountsQuery,
+)
 from ..enums import AccountStatus
 from ..models import (
     AccountChangeSet,
@@ -88,8 +93,12 @@ class LocalAccountRepository:
                 CREATE INDEX IF NOT EXISTS idx_acc_deleted
                     ON {_TBL} (deleted_at) WHERE deleted_at IS NOT NULL;
             """)
-            self._ensure_column_sync(conn, "quota_grok_4_3", "TEXT NOT NULL DEFAULT '{}'")
-            self._ensure_column_sync(conn, "quota_console", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column_sync(
+                conn, "quota_grok_4_3", "TEXT NOT NULL DEFAULT '{}'"
+            )
+            self._ensure_column_sync(
+                conn, "quota_console", "TEXT NOT NULL DEFAULT '{}'"
+            )
             self._ensure_global_success_count_sync(conn)
             conn.commit()
 
@@ -144,20 +153,20 @@ class LocalAccountRepository:
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> AccountRecord:
         d = dict(row)
-        d["tags"]  = json.loads(d.get("tags")  or "[]")
-        heavy_raw     = d.pop("quota_heavy",     "{}") or "{}"
-        grok_4_3_raw  = d.pop("quota_grok_4_3",  "{}") or "{}"
-        console_raw   = d.pop("quota_console",   "{}") or "{}"
-        heavy_dict    = json.loads(heavy_raw)
+        d["tags"] = json.loads(d.get("tags") or "[]")
+        heavy_raw = d.pop("quota_heavy", "{}") or "{}"
+        grok_4_3_raw = d.pop("quota_grok_4_3", "{}") or "{}"
+        console_raw = d.pop("quota_console", "{}") or "{}"
+        heavy_dict = json.loads(heavy_raw)
         grok_4_3_dict = json.loads(grok_4_3_raw)
-        console_dict  = json.loads(console_raw)
+        console_dict = json.loads(console_raw)
         d["quota"] = {
-            "auto":   json.loads(d.pop("quota_auto",   "{}") or "{}"),
-            "fast":   json.loads(d.pop("quota_fast",   "{}") or "{}"),
+            "auto": json.loads(d.pop("quota_auto", "{}") or "{}"),
+            "fast": json.loads(d.pop("quota_fast", "{}") or "{}"),
             "expert": json.loads(d.pop("quota_expert", "{}") or "{}"),
-            **({"heavy":    heavy_dict}    if heavy_dict    else {}),
+            **({"heavy": heavy_dict} if heavy_dict else {}),
             **({"grok_4_3": grok_4_3_dict} if grok_4_3_dict else {}),
-            **({"console":  console_dict}  if console_dict  else {}),
+            **({"console": console_dict} if console_dict else {}),
         }
         d["ext"] = json.loads(d.get("ext") or "{}")
         return AccountRecord.model_validate(d)
@@ -166,30 +175,32 @@ class LocalAccountRepository:
     def _record_to_row(record: AccountRecord, revision: int) -> dict[str, Any]:
         qs = record.quota_set()
         return {
-            "token":            record.token,
-            "pool":             record.pool,
-            "status":           record.status.value,
-            "created_at":       record.created_at,
-            "updated_at":       record.updated_at,
-            "tags":             json.dumps(record.tags),
-            "quota_auto":       json.dumps(qs.auto.to_dict()),
-            "quota_fast":       json.dumps(qs.fast.to_dict()),
-            "quota_expert":     json.dumps(qs.expert.to_dict()),
-            "quota_heavy":      json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
-            "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
-            "quota_console":    json.dumps(qs.console.to_dict())  if qs.console  else "{}",
-            "usage_use_count":  record.usage_use_count,
+            "token": record.token,
+            "pool": record.pool,
+            "status": record.status.value,
+            "created_at": record.created_at,
+            "updated_at": record.updated_at,
+            "tags": json.dumps(record.tags),
+            "quota_auto": json.dumps(qs.auto.to_dict()),
+            "quota_fast": json.dumps(qs.fast.to_dict()),
+            "quota_expert": json.dumps(qs.expert.to_dict()),
+            "quota_heavy": json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
+            "quota_grok_4_3": json.dumps(qs.grok_4_3.to_dict())
+            if qs.grok_4_3
+            else "{}",
+            "quota_console": json.dumps(qs.console.to_dict()) if qs.console else "{}",
+            "usage_use_count": record.usage_use_count,
             "usage_fail_count": record.usage_fail_count,
             "usage_sync_count": record.usage_sync_count,
-            "last_use_at":      record.last_use_at,
-            "last_fail_at":     record.last_fail_at,
+            "last_use_at": record.last_use_at,
+            "last_fail_at": record.last_fail_at,
             "last_fail_reason": record.last_fail_reason,
-            "last_sync_at":     record.last_sync_at,
-            "last_clear_at":    record.last_clear_at,
-            "state_reason":     record.state_reason,
-            "deleted_at":       record.deleted_at,
-            "ext":              json.dumps(record.ext),
-            "revision":         revision,
+            "last_sync_at": record.last_sync_at,
+            "last_clear_at": record.last_clear_at,
+            "state_reason": record.state_reason,
+            "deleted_at": record.deleted_at,
+            "ext": json.dumps(record.ext),
+            "revision": revision,
         }
 
     def _upsert_sync(
@@ -202,11 +213,13 @@ class LocalAccountRepository:
         count = 0
         for item in items:
             try:
-                token = AccountRecord.model_validate({"token": item.token, "pool": item.pool}).token
+                token = AccountRecord.model_validate(
+                    {"token": item.token, "pool": item.pool}
+                ).token
             except ValueError:
                 continue
             pool = item.pool if item.pool in ("basic", "super", "heavy") else "basic"
-            qs   = default_quota_set(pool)
+            qs = default_quota_set(pool)
             conn.execute(
                 f"""
                 INSERT INTO {_TBL} (
@@ -230,17 +243,17 @@ class LocalAccountRepository:
                 """,
                 {
                     "token": token,
-                    "pool":  pool,
-                    "ts":    ts,
-                    "tags":  json.dumps(item.tags),
-                    "qa":    json.dumps(qs.auto.to_dict()),
-                    "qf":    json.dumps(qs.fast.to_dict()),
-                    "qe":    json.dumps(qs.expert.to_dict()),
-                    "qh":    json.dumps(qs.heavy.to_dict())    if qs.heavy    else "{}",
-                    "qg":    json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
-                    "qc":    json.dumps(qs.console.to_dict())  if qs.console  else "{}",
-                    "ext":   json.dumps(item.ext),
-                    "rev":   revision,
+                    "pool": pool,
+                    "ts": ts,
+                    "tags": json.dumps(item.tags),
+                    "qa": json.dumps(qs.auto.to_dict()),
+                    "qf": json.dumps(qs.fast.to_dict()),
+                    "qe": json.dumps(qs.expert.to_dict()),
+                    "qh": json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
+                    "qg": json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
+                    "qc": json.dumps(qs.console.to_dict()) if qs.console else "{}",
+                    "ext": json.dumps(item.ext),
+                    "rev": revision,
                 },
             )
             count += conn.execute("SELECT changes()").fetchone()[0]
@@ -283,11 +296,17 @@ class LocalAccountRepository:
 
             # Usage counters (delta).
             if patch.usage_use_delta is not None:
-                sets["usage_use_count"] = max(0, record.usage_use_count + patch.usage_use_delta)
+                sets["usage_use_count"] = max(
+                    0, record.usage_use_count + patch.usage_use_delta
+                )
             if patch.usage_fail_delta is not None:
-                sets["usage_fail_count"] = max(0, record.usage_fail_count + patch.usage_fail_delta)
+                sets["usage_fail_count"] = max(
+                    0, record.usage_fail_count + patch.usage_fail_delta
+                )
             if patch.usage_sync_delta is not None:
-                sets["usage_sync_count"] = max(0, record.usage_sync_count + patch.usage_sync_delta)
+                sets["usage_sync_count"] = max(
+                    0, record.usage_sync_count + patch.usage_sync_delta
+                )
 
             # Quota windows.
             if patch.quota_auto is not None:
@@ -318,15 +337,21 @@ class LocalAccountRepository:
             if patch.ext_merge:
                 ext.update(patch.ext_merge)
             if patch.clear_failures:
-                for k in ("cooldown_until", "cooldown_reason", "disabled_at",
-                          "disabled_reason", "expired_at", "expired_reason",
-                          "forbidden_strikes"):
+                for k in (
+                    "cooldown_until",
+                    "cooldown_reason",
+                    "disabled_at",
+                    "disabled_reason",
+                    "expired_at",
+                    "expired_reason",
+                    "forbidden_strikes",
+                ):
                     ext.pop(k, None)
-                sets["status"]           = AccountStatus.ACTIVE.value
+                sets["status"] = AccountStatus.ACTIVE.value
                 sets["usage_fail_count"] = 0
-                sets["last_fail_at"]     = None
+                sets["last_fail_at"] = None
                 sets["last_fail_reason"] = None
-                sets["state_reason"]     = None
+                sets["state_reason"] = None
             sets["ext"] = json.dumps(ext)
 
             col_sql = ", ".join(f"{k} = :{k}" for k in sets)
@@ -349,6 +374,7 @@ class LocalAccountRepository:
         def _sync() -> int:
             with closing(self._connect()) as conn:
                 return self._get_revision_sync(conn)
+
         return await asyncio.to_thread(_sync)
 
     async def get_global_success_count(self) -> int:
@@ -381,6 +407,18 @@ class LocalAccountRepository:
         async with self._lock:
             return await asyncio.to_thread(_sync)
 
+    async def aggregate_usage(self) -> dict[str, int]:
+        def _sync() -> dict[str, int]:
+            with closing(self._connect()) as conn:
+                row = conn.execute(
+                    f"SELECT COALESCE(SUM(usage_use_count), 0), "
+                    f"COALESCE(SUM(usage_fail_count), 0) "
+                    f"FROM {_TBL} WHERE deleted_at IS NULL"
+                ).fetchone()
+                return {"use_count": int(row[0] or 0), "fail_count": int(row[1] or 0)}
+
+        return await asyncio.to_thread(_sync)
+
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         def _sync() -> RuntimeSnapshot:
             with closing(self._connect()) as conn:
@@ -392,6 +430,7 @@ class LocalAccountRepository:
                     revision=rev,
                     items=[self._row_to_record(r) for r in rows],
                 )
+
         return await asyncio.to_thread(_sync)
 
     async def scan_changes(
@@ -422,6 +461,7 @@ class LocalAccountRepository:
                     deleted_tokens=deleted,
                     has_more=has_more,
                 )
+
         return await asyncio.to_thread(_sync)
 
     async def upsert_accounts(
@@ -433,7 +473,7 @@ class LocalAccountRepository:
 
         def _sync() -> AccountMutationResult:
             with closing(self._connect()) as conn:
-                rev   = self._bump_revision(conn)
+                rev = self._bump_revision(conn)
                 count = self._upsert_sync(conn, items, rev)
                 conn.commit()
                 return AccountMutationResult(upserted=count, revision=rev)
@@ -450,7 +490,7 @@ class LocalAccountRepository:
 
         def _sync() -> AccountMutationResult:
             with closing(self._connect()) as conn:
-                rev   = self._bump_revision(conn)
+                rev = self._bump_revision(conn)
                 count = self._patch_sync(conn, patches, rev)
                 conn.commit()
                 return AccountMutationResult(patched=count, revision=rev)
@@ -516,14 +556,33 @@ class LocalAccountRepository:
                 if query.status:
                     where_parts.append("status = ?")
                     params.append(query.status.value)
+                # tags stored as a JSON array string, e.g. ["nsfw"]; match the
+                # quoted element to avoid substring collisions across tag names.
+                for tag in query.tags:
+                    where_parts.append("tags LIKE ?")
+                    params.append(f'%"{tag}"%')
+                for tag in query.exclude_tags:
+                    where_parts.append("tags NOT LIKE ?")
+                    params.append(f'%"{tag}"%')
 
-                where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+                where_sql = (
+                    ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+                )
                 order_dir = "DESC" if query.sort_desc else "ASC"
                 # Allow only known column names to prevent injection.
-                safe_sort = query.sort_by if query.sort_by in {
-                    "updated_at", "created_at", "last_use_at", "token",
-                    "usage_use_count", "usage_fail_count",
-                } else "updated_at"
+                safe_sort = (
+                    query.sort_by
+                    if query.sort_by
+                    in {
+                        "updated_at",
+                        "created_at",
+                        "last_use_at",
+                        "token",
+                        "usage_use_count",
+                        "usage_fail_count",
+                    }
+                    else "updated_at"
+                )
                 order_sql = f"ORDER BY {safe_sort} {order_dir}"
 
                 total = conn.execute(
@@ -532,8 +591,7 @@ class LocalAccountRepository:
 
                 offset = (query.page - 1) * query.page_size
                 rows = conn.execute(
-                    f"SELECT * FROM {_TBL} {where_sql} {order_sql} "
-                    f"LIMIT ? OFFSET ?",
+                    f"SELECT * FROM {_TBL} {where_sql} {order_sql} LIMIT ? OFFSET ?",
                     params + [query.page_size, offset],
                 ).fetchall()
                 items = [self._row_to_record(r) for r in rows]

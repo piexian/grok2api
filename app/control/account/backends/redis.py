@@ -10,7 +10,12 @@ Layout:
 import json
 
 from app.platform.runtime.clock import now_ms
-from ..commands import AccountPatch, AccountUpsert, BulkReplacePoolCommand, ListAccountsQuery
+from ..commands import (
+    AccountPatch,
+    AccountUpsert,
+    BulkReplacePoolCommand,
+    ListAccountsQuery,
+)
 from ..enums import AccountStatus
 from ..models import (
     AccountChangeSet,
@@ -23,11 +28,11 @@ from redis.asyncio import Redis
 
 from ..quota_defaults import default_quota_set
 
-_KEY_REV      = "accounts:rev"
+_KEY_REV = "accounts:rev"
 _KEY_GLOBAL_SUCCESS_COUNT = "accounts:global_success_count"
-_KEY_RECORD   = "accounts:record:{token}"
-_KEY_POOL     = "accounts:pool:{pool}"
-_KEY_REV_LOG  = "accounts:revision_log"
+_KEY_RECORD = "accounts:record:{token}"
+_KEY_POOL = "accounts:pool:{pool}"
+_KEY_REV_LOG = "accounts:revision_log"
 
 
 def _record_key(token: str) -> str:
@@ -55,29 +60,31 @@ class RedisAccountRepository:
     def _to_hash(record: AccountRecord, revision: int) -> dict[str, str]:
         qs = record.quota_set()
         return {
-            "pool":             record.pool,
-            "status":           record.status.value,
-            "created_at":       str(record.created_at),
-            "updated_at":       str(record.updated_at),
-            "tags":             json.dumps(record.tags),
-            "quota_auto":       json.dumps(qs.auto.to_dict()),
-            "quota_fast":       json.dumps(qs.fast.to_dict()),
-            "quota_expert":     json.dumps(qs.expert.to_dict()),
-            "quota_heavy":      json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
-            "quota_grok_4_3":   json.dumps(qs.grok_4_3.to_dict()) if qs.grok_4_3 else "{}",
-            "quota_console":    json.dumps(qs.console.to_dict()) if qs.console else "{}",
-            "usage_use_count":  str(record.usage_use_count),
+            "pool": record.pool,
+            "status": record.status.value,
+            "created_at": str(record.created_at),
+            "updated_at": str(record.updated_at),
+            "tags": json.dumps(record.tags),
+            "quota_auto": json.dumps(qs.auto.to_dict()),
+            "quota_fast": json.dumps(qs.fast.to_dict()),
+            "quota_expert": json.dumps(qs.expert.to_dict()),
+            "quota_heavy": json.dumps(qs.heavy.to_dict()) if qs.heavy else "{}",
+            "quota_grok_4_3": json.dumps(qs.grok_4_3.to_dict())
+            if qs.grok_4_3
+            else "{}",
+            "quota_console": json.dumps(qs.console.to_dict()) if qs.console else "{}",
+            "usage_use_count": str(record.usage_use_count),
             "usage_fail_count": str(record.usage_fail_count),
             "usage_sync_count": str(record.usage_sync_count),
-            "last_use_at":      str(record.last_use_at or ""),
-            "last_fail_at":     str(record.last_fail_at or ""),
+            "last_use_at": str(record.last_use_at or ""),
+            "last_fail_at": str(record.last_fail_at or ""),
             "last_fail_reason": record.last_fail_reason or "",
-            "last_sync_at":     str(record.last_sync_at or ""),
-            "last_clear_at":    str(record.last_clear_at or ""),
-            "state_reason":     record.state_reason or "",
-            "deleted_at":       str(record.deleted_at or ""),
-            "ext":              json.dumps(record.ext),
-            "revision":         str(revision),
+            "last_sync_at": str(record.last_sync_at or ""),
+            "last_clear_at": str(record.last_clear_at or ""),
+            "state_reason": record.state_reason or "",
+            "deleted_at": str(record.deleted_at or ""),
+            "ext": json.dumps(record.ext),
+            "revision": str(revision),
         }
 
     @staticmethod
@@ -90,40 +97,48 @@ class RedisAccountRepository:
             v = _s(k)
             return int(v) if v else None
 
-        return AccountRecord.model_validate({
-            "token":            token,
-            "pool":             _s("pool") or "basic",
-            "status":           _s("status") or "active",
-            "created_at":       _i("created_at") or now_ms(),
-            "updated_at":       _i("updated_at") or now_ms(),
-            "tags":             json.loads(_s("tags") or "[]"),
-            "quota":            {
-                "auto":   json.loads(_s("quota_auto")   or "{}"),
-                "fast":   json.loads(_s("quota_fast")   or "{}"),
-                "expert": json.loads(_s("quota_expert") or "{}"),
-                **({
-                    "heavy": json.loads(_s("quota_heavy"))
-                } if _s("quota_heavy") and _s("quota_heavy") != "{}" else {}),
-                **({
-                    "grok_4_3": json.loads(_s("quota_grok_4_3"))
-                } if _s("quota_grok_4_3") and _s("quota_grok_4_3") != "{}" else {}),
-                **({
-                    "console": json.loads(_s("quota_console"))
-                } if _s("quota_console") and _s("quota_console") != "{}" else {}),
-            },
-            "usage_use_count":  int(_s("usage_use_count")  or 0),
-            "usage_fail_count": int(_s("usage_fail_count") or 0),
-            "usage_sync_count": int(_s("usage_sync_count") or 0),
-            "last_use_at":      _i("last_use_at"),
-            "last_fail_at":     _i("last_fail_at"),
-            "last_fail_reason": _s("last_fail_reason") or None,
-            "last_sync_at":     _i("last_sync_at"),
-            "last_clear_at":    _i("last_clear_at"),
-            "state_reason":     _s("state_reason") or None,
-            "deleted_at":       _i("deleted_at"),
-            "ext":              json.loads(_s("ext") or "{}"),
-            "revision":         int(_s("revision") or 0),
-        })
+        return AccountRecord.model_validate(
+            {
+                "token": token,
+                "pool": _s("pool") or "basic",
+                "status": _s("status") or "active",
+                "created_at": _i("created_at") or now_ms(),
+                "updated_at": _i("updated_at") or now_ms(),
+                "tags": json.loads(_s("tags") or "[]"),
+                "quota": {
+                    "auto": json.loads(_s("quota_auto") or "{}"),
+                    "fast": json.loads(_s("quota_fast") or "{}"),
+                    "expert": json.loads(_s("quota_expert") or "{}"),
+                    **(
+                        {"heavy": json.loads(_s("quota_heavy"))}
+                        if _s("quota_heavy") and _s("quota_heavy") != "{}"
+                        else {}
+                    ),
+                    **(
+                        {"grok_4_3": json.loads(_s("quota_grok_4_3"))}
+                        if _s("quota_grok_4_3") and _s("quota_grok_4_3") != "{}"
+                        else {}
+                    ),
+                    **(
+                        {"console": json.loads(_s("quota_console"))}
+                        if _s("quota_console") and _s("quota_console") != "{}"
+                        else {}
+                    ),
+                },
+                "usage_use_count": int(_s("usage_use_count") or 0),
+                "usage_fail_count": int(_s("usage_fail_count") or 0),
+                "usage_sync_count": int(_s("usage_sync_count") or 0),
+                "last_use_at": _i("last_use_at"),
+                "last_fail_at": _i("last_fail_at"),
+                "last_fail_reason": _s("last_fail_reason") or None,
+                "last_sync_at": _i("last_sync_at"),
+                "last_clear_at": _i("last_clear_at"),
+                "state_reason": _s("state_reason") or None,
+                "deleted_at": _i("deleted_at"),
+                "ext": json.loads(_s("ext") or "{}"),
+                "revision": int(_s("revision") or 0),
+            }
+        )
 
     # ------------------------------------------------------------------
     # Revision management
@@ -161,6 +176,19 @@ class RedisAccountRepository:
             return await self.get_global_success_count()
         return int(await self._r.incrby(_KEY_GLOBAL_SUCCESS_COUNT, delta))
 
+    async def aggregate_usage(self) -> dict[str, int]:
+        use_total = 0
+        fail_total = 0
+        async for key in self._r.scan_iter("accounts:record:*"):
+            h = await self._r.hmget(
+                key, "usage_use_count", "usage_fail_count", "deleted_at"
+            )
+            if h[2]:  # deleted_at set → skip soft-deleted
+                continue
+            use_total += int(h[0] or 0)
+            fail_total += int(h[1] or 0)
+        return {"use_count": use_total, "fail_count": fail_total}
+
     async def runtime_snapshot(self) -> RuntimeSnapshot:
         rev = await self.get_revision()
         # Scan all record keys.
@@ -195,9 +223,7 @@ class RedisAccountRepository:
             start=0,
             num=limit,
         )
-        tokens = [
-            (e.decode() if isinstance(e, bytes) else e) for e in entries
-        ]
+        tokens = [(e.decode() if isinstance(e, bytes) else e) for e in entries]
         items: list[AccountRecord] = []
         deleted: list[str] = []
         for token in tokens:
@@ -227,20 +253,22 @@ class RedisAccountRepository:
         count = 0
         for item in items:
             try:
-                token = AccountRecord.model_validate({"token": item.token, "pool": item.pool}).token
+                token = AccountRecord.model_validate(
+                    {"token": item.token, "pool": item.pool}
+                ).token
             except ValueError:
                 continue
             pool = item.pool if item.pool in ("basic", "super", "heavy") else "basic"
-            qs   = default_quota_set(pool)
-            ts   = now_ms()
+            qs = default_quota_set(pool)
+            ts = now_ms()
             record = AccountRecord(
-                token    = token,
-                pool     = pool,
-                tags     = item.tags,
-                ext      = item.ext,
-                quota    = qs.to_dict(),
-                created_at = ts,
-                updated_at = ts,
+                token=token,
+                pool=pool,
+                tags=item.tags,
+                ext=item.ext,
+                quota=qs.to_dict(),
+                created_at=ts,
+                updated_at=ts,
             )
             key = _record_key(token)
             await self._r.hset(key, mapping=self._to_hash(record, rev))
@@ -266,7 +294,7 @@ class RedisAccountRepository:
             record = self._from_hash(patch.token, h)
             updates: dict[str, str] = {
                 "updated_at": str(ts),
-                "revision":   str(rev),
+                "revision": str(rev),
             }
             if patch.status is not None:
                 updates["status"] = patch.status.value
@@ -299,11 +327,17 @@ class RedisAccountRepository:
 
             # Usage counters.
             if patch.usage_use_delta is not None:
-                updates["usage_use_count"] = str(max(0, record.usage_use_count + patch.usage_use_delta))
+                updates["usage_use_count"] = str(
+                    max(0, record.usage_use_count + patch.usage_use_delta)
+                )
             if patch.usage_fail_delta is not None:
-                updates["usage_fail_count"] = str(max(0, record.usage_fail_count + patch.usage_fail_delta))
+                updates["usage_fail_count"] = str(
+                    max(0, record.usage_fail_count + patch.usage_fail_delta)
+                )
             if patch.usage_sync_delta is not None:
-                updates["usage_sync_count"] = str(max(0, record.usage_sync_count + patch.usage_sync_delta))
+                updates["usage_sync_count"] = str(
+                    max(0, record.usage_sync_count + patch.usage_sync_delta)
+                )
 
             # Tags.
             tags = list(record.tags)
@@ -322,15 +356,21 @@ class RedisAccountRepository:
             if patch.ext_merge:
                 ext.update(patch.ext_merge)
             if patch.clear_failures:
-                for k in ("cooldown_until", "cooldown_reason", "disabled_at",
-                          "disabled_reason", "expired_at", "expired_reason",
-                          "forbidden_strikes"):
+                for k in (
+                    "cooldown_until",
+                    "cooldown_reason",
+                    "disabled_at",
+                    "disabled_reason",
+                    "expired_at",
+                    "expired_reason",
+                    "forbidden_strikes",
+                ):
                     ext.pop(k, None)
-                updates["status"]           = AccountStatus.ACTIVE.value
+                updates["status"] = AccountStatus.ACTIVE.value
                 updates["usage_fail_count"] = "0"
-                updates["last_fail_at"]     = ""
+                updates["last_fail_at"] = ""
                 updates["last_fail_reason"] = ""
-                updates["state_reason"]     = ""
+                updates["state_reason"] = ""
             updates["ext"] = json.dumps(ext)
 
             await self._r.hset(key, mapping=updates)
@@ -345,7 +385,7 @@ class RedisAccountRepository:
         if not tokens:
             return AccountMutationResult()
         rev = await self._bump_revision()
-        ts  = now_ms()
+        ts = now_ms()
         count = 0
         for token in tokens:
             key = _record_key(token)
@@ -355,14 +395,17 @@ class RedisAccountRepository:
             h = await self._r.hgetall(key)
             if not h:
                 continue
-            pool = (h.get(b"pool") or h.get("pool") or b"basic")
+            pool = h.get(b"pool") or h.get("pool") or b"basic"
             if isinstance(pool, bytes):
                 pool = pool.decode()
-            await self._r.hset(key, mapping={
-                "deleted_at": str(ts),
-                "updated_at": str(ts),
-                "revision":   str(rev),
-            })
+            await self._r.hset(
+                key,
+                mapping={
+                    "deleted_at": str(ts),
+                    "updated_at": str(ts),
+                    "revision": str(rev),
+                },
+            )
             await self._r.srem(_pool_key(pool), token)
             await self._r.zadd(_KEY_REV_LOG, {token: rev})
             count += 1
@@ -397,6 +440,10 @@ class RedisAccountRepository:
                 continue
             if query.status and r.status != query.status:
                 continue
+            if query.tags and not set(query.tags).issubset(r.tags):
+                continue
+            if query.exclude_tags and set(query.exclude_tags) & set(r.tags):
+                continue
             all_records.append(r)
 
         # Sort.
@@ -424,9 +471,7 @@ class RedisAccountRepository:
         command: BulkReplacePoolCommand,
     ) -> AccountMutationResult:
         existing = await self._r.smembers(_pool_key(command.pool))
-        tokens = [
-            (t.decode() if isinstance(t, bytes) else t) for t in existing
-        ]
+        tokens = [(t.decode() if isinstance(t, bytes) else t) for t in existing]
         deleted_result = await self.delete_accounts(tokens)
         upserted_result = await self.upsert_accounts(command.upserts)
         return AccountMutationResult(

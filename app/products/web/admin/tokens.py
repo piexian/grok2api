@@ -12,7 +12,7 @@ import re
 from typing import TYPE_CHECKING
 
 import orjson
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, RootModel
 
@@ -40,12 +40,23 @@ router = APIRouter(tags=["Admin - Tokens"])
 # Token sanitisation
 # ---------------------------------------------------------------------------
 
-_TOKEN_TRANS = str.maketrans({
-    "\u2010": "-", "\u2011": "-", "\u2012": "-",
-    "\u2013": "-", "\u2014": "-", "\u2212": "-",
-    "\u00a0": " ", "\u2007": " ", "\u202f": " ",
-    "\u200b": "", "\u200c": "", "\u200d": "", "\ufeff": "",
-})
+_TOKEN_TRANS = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+        "\u00a0": " ",
+        "\u2007": " ",
+        "\u202f": " ",
+        "\u200b": "",
+        "\u200c": "",
+        "\u200d": "",
+        "\ufeff": "",
+    }
+)
 _STRIP_RE = re.compile(r"\s+")
 
 
@@ -64,6 +75,7 @@ def _mask(token: str) -> str:
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
 
 class ReplacePoolRequest(BaseModel):
     pool: str
@@ -106,6 +118,7 @@ class SaveTokensRequest(RootModel[dict[str, list[str | TokenImportItem]]]):
 # Serialisation — zero-copy quota extraction
 # ---------------------------------------------------------------------------
 
+
 def _quota_brief(q: dict) -> dict:
     """Extract compact quota windows for admin display."""
     out = {}
@@ -132,13 +145,13 @@ def _serialize_record(r) -> dict:
         else {}
     )
     return {
-        "token":       r.token,
-        "pool":        r.pool or "basic",
-        "status":      status,
-        "quota":       quota,
-        "use_count":   r.usage_use_count or 0,
+        "token": r.token,
+        "pool": r.pool or "basic",
+        "status": status,
+        "quota": quota,
+        "use_count": r.usage_use_count or 0,
         "last_used_at": r.last_use_at,
-        "tags":        r.tags or [],
+        "tags": r.tags or [],
     }
 
 
@@ -151,23 +164,50 @@ def _json(data) -> Response:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/tokens")
-async def list_tokens(repo: "AccountRepository" = Depends(get_repo)):
-    """Return flat token list."""
-    all_items: list = []
-    global_success_count = await repo.get_global_success_count()
-    page_num = 1
-    while True:
-        page = await repo.list_accounts(ListAccountsQuery(page=page_num, page_size=2000))
-        all_items.extend(page.items)
-        if page_num * 2000 >= page.total:
-            break
-        page_num += 1
 
-    return _json({
-        "tokens": [_serialize_record(r) for r in all_items],
-        "stats": {"success_count": global_success_count},
-    })
+@router.get("/tokens")
+async def list_tokens(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    pool: str | None = Query(None),
+    status: str | None = Query(None),
+    tags: str | None = Query(
+        None, description="comma-separated; account must have ALL"
+    ),
+    exclude_tags: str | None = Query(
+        None, description="comma-separated; account must have NONE"
+    ),
+    sort_by: str = Query("updated_at"),
+    sort_desc: bool = Query(True),
+    repo: "AccountRepository" = Depends(get_repo),
+):
+    """Return one server-paginated, filtered, sorted page of tokens."""
+    try:
+        status_enum = AccountStatus(status) if status else None
+    except ValueError:
+        status_enum = None
+
+    query = ListAccountsQuery(
+        page=page,
+        page_size=page_size,
+        pool=pool or None,
+        status=status_enum,
+        tags=[t for t in (tags or "").split(",") if t.strip()],
+        exclude_tags=[t for t in (exclude_tags or "").split(",") if t.strip()],
+        sort_by=sort_by,
+        sort_desc=sort_desc,
+    )
+    pg = await repo.list_accounts(query)
+    return _json(
+        {
+            "tokens": [_serialize_record(r) for r in pg.items],
+            "total": pg.total,
+            "page": pg.page,
+            "page_size": pg.page_size,
+            "total_pages": pg.total_pages,
+            "revision": pg.revision,
+        }
+    )
 
 
 @router.post("/tokens")
@@ -187,9 +227,15 @@ async def save_tokens(
             token_val = _sanitize(td.get("token", ""))
             if not token_val:
                 continue
-            upserts.append(AccountUpsert(token=token_val, pool=pool_name, tags=td.get("tags") or []))
+            upserts.append(
+                AccountUpsert(
+                    token=token_val, pool=pool_name, tags=td.get("tags") or []
+                )
+            )
         if upserts:
-            await repo.replace_pool(BulkReplacePoolCommand(pool=pool_name, upserts=upserts))
+            await repo.replace_pool(
+                BulkReplacePoolCommand(pool=pool_name, upserts=upserts)
+            )
             all_tokens.extend(u.token for u in upserts)
             total_upserted += len(upserts)
 
@@ -227,7 +273,9 @@ async def add_tokens(
     if not new_tokens:
         return _json({"status": "success", "count": 0, "skipped": len(cleaned)})
 
-    upserts = [AccountUpsert(token=t, pool=requested_pool, tags=req.tags) for t in new_tokens]
+    upserts = [
+        AccountUpsert(token=t, pool=requested_pool, tags=req.tags) for t in new_tokens
+    ]
     result = await repo.upsert_accounts(upserts)
     logger.info(
         "admin tokens added: pool={} added_count={} skipped_count={}",
@@ -241,19 +289,27 @@ async def add_tokens(
             refresh_result = await refresh_svc.refresh_on_import(new_tokens)
             logger.info(
                 "admin auto-detect quota sync completed: token_count={} refreshed={} failed={}",
-                len(new_tokens), refresh_result.refreshed, refresh_result.failed,
+                len(new_tokens),
+                refresh_result.refreshed,
+                refresh_result.failed,
             )
         except Exception as exc:
-            logger.warning("admin auto-detect quota sync failed: token_count={} error={}", len(new_tokens), exc)
+            logger.warning(
+                "admin auto-detect quota sync failed: token_count={} error={}",
+                len(new_tokens),
+                exc,
+            )
     else:
         asyncio.create_task(_refresh_imported(refresh_svc, new_tokens))
 
-    return _json({
-        "status": "success",
-        "count": result.upserted or len(new_tokens),
-        "skipped": len(existing),
-        "synced": sync_auto_detect,
-    })
+    return _json(
+        {
+            "status": "success",
+            "count": result.upserted or len(new_tokens),
+            "skipped": len(existing),
+            "synced": sync_auto_detect,
+        }
+    )
 
 
 @router.delete("/tokens")
@@ -301,42 +357,55 @@ async def edit_token(
                 status=409,
             )
 
-    await repo.upsert_accounts([AccountUpsert(
-        token=new_token,
-        pool=pool,
-        tags=record.tags,
-        ext=record.ext,
-    )])
+    await repo.upsert_accounts(
+        [
+            AccountUpsert(
+                token=new_token,
+                pool=pool,
+                tags=record.tags,
+                ext=record.ext,
+            )
+        ]
+    )
 
     if old_token == new_token:
         logger.info("admin token updated: token={} pool={}", _mask(new_token), pool)
         return _json({"status": "success", "token": new_token, "pool": pool})
 
     qs = record.quota_set()
-    await repo.patch_accounts([AccountPatch(
-        token=new_token,
-        status=record.status,
-        tags=record.tags,
-        quota_auto=qs.auto.to_dict(),
-        quota_fast=qs.fast.to_dict(),
-        quota_expert=qs.expert.to_dict(),
-        quota_heavy=qs.heavy.to_dict() if qs.heavy else None,
-        quota_grok_4_3=qs.grok_4_3.to_dict() if qs.grok_4_3 else None,
-        quota_console=qs.console.to_dict() if qs.console else None,
-        usage_use_delta=record.usage_use_count,
-        usage_fail_delta=record.usage_fail_count,
-        usage_sync_delta=record.usage_sync_count,
-        last_use_at=record.last_use_at,
-        last_fail_at=record.last_fail_at,
-        last_fail_reason=record.last_fail_reason,
-        last_sync_at=record.last_sync_at,
-        last_clear_at=record.last_clear_at,
-        state_reason=record.state_reason,
-        ext_merge=record.ext,
-    )])
+    await repo.patch_accounts(
+        [
+            AccountPatch(
+                token=new_token,
+                status=record.status,
+                tags=record.tags,
+                quota_auto=qs.auto.to_dict(),
+                quota_fast=qs.fast.to_dict(),
+                quota_expert=qs.expert.to_dict(),
+                quota_heavy=qs.heavy.to_dict() if qs.heavy else None,
+                quota_grok_4_3=qs.grok_4_3.to_dict() if qs.grok_4_3 else None,
+                quota_console=qs.console.to_dict() if qs.console else None,
+                usage_use_delta=record.usage_use_count,
+                usage_fail_delta=record.usage_fail_count,
+                usage_sync_delta=record.usage_sync_count,
+                last_use_at=record.last_use_at,
+                last_fail_at=record.last_fail_at,
+                last_fail_reason=record.last_fail_reason,
+                last_sync_at=record.last_sync_at,
+                last_clear_at=record.last_clear_at,
+                state_reason=record.state_reason,
+                ext_merge=record.ext,
+            )
+        ]
+    )
     await repo.delete_accounts([old_token])
 
-    logger.info("admin token replaced: previous_token={} current_token={} pool={}", _mask(old_token), _mask(new_token), pool)
+    logger.info(
+        "admin token replaced: previous_token={} current_token={} pool={}",
+        _mask(old_token),
+        _mask(new_token),
+        pool,
+    )
     return _json({"status": "success", "token": new_token, "pool": pool})
 
 
@@ -360,24 +429,32 @@ async def toggle_token_disabled(
     record = records[0]
 
     if req.disabled:
-        await repo.patch_accounts([AccountPatch(
-            token=token,
-            status=AccountStatus.DISABLED,
-            state_reason="operator_disabled",
-            ext_merge={
-                **record.ext,
-                "disabled_at": now_ms(),
-                "disabled_reason": "operator_disabled",
-            },
-        )])
+        await repo.patch_accounts(
+            [
+                AccountPatch(
+                    token=token,
+                    status=AccountStatus.DISABLED,
+                    state_reason="operator_disabled",
+                    ext_merge={
+                        **record.ext,
+                        "disabled_at": now_ms(),
+                        "disabled_reason": "operator_disabled",
+                    },
+                )
+            ]
+        )
         logger.info("admin token disabled: token={}", _mask(token))
         return _json({"status": "success", "token": token, "disabled": True})
 
-    await repo.patch_accounts([AccountPatch(
-        token=token,
-        status=AccountStatus.ACTIVE,
-        clear_failures=True,
-    )])
+    await repo.patch_accounts(
+        [
+            AccountPatch(
+                token=token,
+                status=AccountStatus.ACTIVE,
+                clear_failures=True,
+            )
+        ]
+    )
     logger.info("admin token restored: token={}", _mask(token))
     return _json({"status": "success", "token": token, "disabled": False})
 
@@ -410,22 +487,26 @@ async def toggle_tokens_disabled(
     patches: list[AccountPatch] = []
     for record in records:
         if req.disabled:
-            patches.append(AccountPatch(
-                token=record.token,
-                status=AccountStatus.DISABLED,
-                state_reason="operator_disabled",
-                ext_merge={
-                    **record.ext,
-                    "disabled_at": ts,
-                    "disabled_reason": "operator_disabled",
-                },
-            ))
+            patches.append(
+                AccountPatch(
+                    token=record.token,
+                    status=AccountStatus.DISABLED,
+                    state_reason="operator_disabled",
+                    ext_merge={
+                        **record.ext,
+                        "disabled_at": ts,
+                        "disabled_reason": "operator_disabled",
+                    },
+                )
+            )
         else:
-            patches.append(AccountPatch(
-                token=record.token,
-                status=AccountStatus.ACTIVE,
-                clear_failures=True,
-            ))
+            patches.append(
+                AccountPatch(
+                    token=record.token,
+                    status=AccountStatus.ACTIVE,
+                    clear_failures=True,
+                )
+            )
 
     result = await repo.patch_accounts(patches)
     logger.info(
@@ -434,15 +515,17 @@ async def toggle_tokens_disabled(
         len(cleaned),
         result.patched,
     )
-    return _json({
-        "status": "success",
-        "disabled": req.disabled,
-        "summary": {
-            "total": len(cleaned),
-            "ok": result.patched,
-            "fail": max(0, len(cleaned) - result.patched),
-        },
-    })
+    return _json(
+        {
+            "status": "success",
+            "disabled": req.disabled,
+            "summary": {
+                "total": len(cleaned),
+                "ok": result.patched,
+                "fail": max(0, len(cleaned) - result.patched),
+            },
+        }
+    )
 
 
 @router.put("/tokens/pool")
@@ -464,9 +547,12 @@ async def replace_pool(
 # Fire-and-forget import refresh
 # ---------------------------------------------------------------------------
 
+
 async def _refresh_imported(svc: "AccountRefreshService", tokens: list[str]) -> None:
     try:
         await svc.refresh_on_import(tokens)
         logger.info("admin import quota sync completed: token_count={}", len(tokens))
     except Exception as exc:
-        logger.warning("admin import quota sync failed: token_count={} error={}", len(tokens), exc)
+        logger.warning(
+            "admin import quota sync failed: token_count={} error={}", len(tokens), exc
+        )
