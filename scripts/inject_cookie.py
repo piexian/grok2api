@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import webbrowser
 
@@ -37,7 +36,7 @@ def decode_jwt_payload(raw: str) -> dict:
         raise ValueError("Not a valid JWT (expected 3 segments)")
 
     payload_b64 = parts[1]
-    payload_b64 += "=" * (4 - len(payload_b64) % 4)
+    payload_b64 += "=" * (-len(payload_b64) % 4)
     try:
         payload = json.loads(base64.urlsafe_b64decode(payload_b64))
     except Exception as exc:

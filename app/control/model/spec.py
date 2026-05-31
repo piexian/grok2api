@@ -109,7 +109,7 @@ class ModelSpec:
             if self.tier == Tier.HEAVY:
                 return (3,)  # heavy only
             if self.tier == Tier.SUPER:
-                return (3, 2, 1)  # heavy, super, lite
+                return (3, 2)  # heavy, super
             if self.tier == Tier.LITE:
                 return (3, 2, 1)  # heavy, super, lite
             return (3, 2, 1, 0)  # heavy, super, lite, basic
@@ -118,7 +118,7 @@ class ModelSpec:
         if self.tier == Tier.LITE:
             return (1, 2, 3)  # lite, super, heavy
         if self.tier == Tier.SUPER:
-            return (2, 1, 3)  # super, lite, heavy
+            return (2, 3)  # super, heavy
         return (3,)  # heavy only
 
 
