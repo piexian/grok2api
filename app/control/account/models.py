@@ -186,6 +186,7 @@ class AccountRecord(BaseModel):
     """
 
     token: str
+    account_id: str | None = None  # Grok's xaiUserId — UUID, used for deduplication
     pool: str = "basic"
     status: AccountStatus = AccountStatus.ACTIVE
     created_at: int = Field(default_factory=now_ms)
@@ -213,6 +214,10 @@ class AccountRecord(BaseModel):
     @property
     def is_nsfw(self) -> bool:
         return "nsfw" in self.tags
+
+    @property
+    def is_lite(self) -> bool:
+        return self.pool == "lite"
 
     @property
     def is_super(self) -> bool:
@@ -273,7 +278,9 @@ class AccountRecord(BaseModel):
     @classmethod
     def _normalize_pool(cls, v: Any) -> str:
         val = str(v or "").strip().lower()
-        if val in ("super"):
+        if val in ("lite",):
+            return "lite"
+        if val in ("super",):
             return "super"
         if val in ("heavy",):
             return "heavy"

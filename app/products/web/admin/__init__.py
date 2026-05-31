@@ -265,6 +265,13 @@ async def account_stats(repo: "AccountRepository" = Depends(get_repo)):
             code="directory_not_initialised",
             status=503,
         )
+    # Pull in any pending repository revisions so post-write stats are fresh,
+    # rather than waiting for the background sync loop's idle interval. A sync
+    # failure must not break the read-only stats endpoint.
+    try:
+        await _directory.sync_if_changed()
+    except Exception as exc:
+        logger.debug("stats pre-snapshot sync failed: error={}", exc)
     snap = _directory.stats_snapshot()
     if snap is None:
         raise AppError(

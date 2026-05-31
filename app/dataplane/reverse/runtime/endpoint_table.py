@@ -27,6 +27,11 @@ ASSETS_DOWNLOAD = ASSETS_CDN  # GET /{path}
 # ── Rate limits (usage / quota sync) ─────────────────────────────────────
 RATE_LIMITS = f"{BASE}/rest/rate-limits"  # POST
 
+# ── Subscription / account type ─────────────────────────────────────────
+SUBSCRIPTIONS     = f"{BASE}/rest/subscriptions"               # GET
+PRODUCTS          = f"{BASE}/rest/products"                    # GET ?provider=SUBSCRIPTION_PROVIDER_STRIPE
+MODES             = f"{BASE}/rest/modes"                       # POST
+
 # ── gRPC-Web endpoints ──────────────────────────────────────────────────
 ACCEPT_TOS = "https://accounts.x.ai/auth_mgmt.AuthManagement/SetTosAcceptedVersion"
 NSFW_MGMT = f"{BASE}/auth_mgmt.AuthManagement/UpdateUserFeatureControls"
@@ -57,6 +62,9 @@ __all__ = [
     "ASSETS_DELETE",
     "ASSETS_DOWNLOAD",
     "RATE_LIMITS",
+    "SUBSCRIPTIONS",
+    "PRODUCTS",
+    "MODES",
     "ACCEPT_TOS",
     "NSFW_MGMT",
     "SET_BIRTH",

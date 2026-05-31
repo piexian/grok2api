@@ -146,6 +146,7 @@ def _serialize_record(r) -> dict:
     )
     return {
         "token": r.token,
+        "account_id": r.account_id,
         "pool": r.pool or "basic",
         "status": status,
         "quota": quota,
@@ -361,6 +362,7 @@ async def edit_token(
         [
             AccountUpsert(
                 token=new_token,
+                account_id=record.account_id,
                 pool=pool,
                 tags=record.tags,
                 ext=record.ext,
@@ -377,6 +379,7 @@ async def edit_token(
         [
             AccountPatch(
                 token=new_token,
+                account_id=record.account_id,
                 status=record.status,
                 tags=record.tags,
                 quota_auto=qs.auto.to_dict(),
