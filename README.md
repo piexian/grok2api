@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Version](https://img.shields.io/badge/version-2.0.4.rc6-111827)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-2.0.5-111827)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![English](https://img.shields.io/badge/English-2563EB?logo=bookstack&logoColor=white)](docs/README.en.md)
 [![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chenyme/grok2api)
@@ -26,7 +26,7 @@ Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 
 
 <br>
 
-## 2.0.4.rc6 更新重点
+## 2.0.5 更新重点
 
 > 以下为 `v2.0.4.rc4` 之后到当前版本的主要变化摘要。
 
@@ -38,7 +38,7 @@ Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 
 - 账号异常处理调整：`invalid-credentials`、`bad-credentials`、session 失效、账号封禁等明确不可用状态会自动禁用账号；后台取消“异常账户”卡片与筛选，历史异常 / 过期状态统一并入“禁用账户”。
 - console.x.ai 返回 `402` 时按额度耗尽处理，账号池会临时绕开该账号，避免持续命中已耗尽的 Console 余额。
 - WebUI 模型下拉框会按当前账号池等级过滤，减少选择到无可用账号层级模型后的失败。
-- 当前预构建镜像：`ghcr.io/piexian/grok2api:2.0.4.rc6`；`ghcr.io/piexian/grok2api:latest` 已指向同一镜像。
+- 当前预构建镜像：`ghcr.io/piexian/grok2api:2.0.5`；`ghcr.io/piexian/grok2api:latest` 已指向同一镜像。
 
 <br>
 
@@ -141,8 +141,8 @@ docker run -d \
 
 | 镜像 | 说明 |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | 当前 latest，已指向 `2.0.4.rc6` |
-| `ghcr.io/piexian/grok2api:2.0.4.rc6` | 固定版本标签 |
+| `ghcr.io/piexian/grok2api:latest` | 当前 latest，已指向 `2.0.5` |
+| `ghcr.io/piexian/grok2api:2.0.5` | 固定版本标签 |
 
 ### Vercel
 

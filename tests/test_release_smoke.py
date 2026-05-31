@@ -61,7 +61,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.4.rc6")
+        self.assertEqual(get_project_version(), "2.0.5")
 
     def test_console_quota_defaults(self):
         self.assertEqual(int(ModeId.CONSOLE), 5)
@@ -214,7 +214,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.4.rc6")
+                self.assertEqual(json.loads(body)["version"], "2.0.5")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)
