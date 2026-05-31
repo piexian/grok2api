@@ -481,11 +481,12 @@ class AccountRuntimeTable:
         }
 
     def quota_totals(self) -> dict:
-        """Sum remaining quota across all live accounts, per mode.
+        """Sum remaining quota across active/cooling accounts, per mode.
 
         Returns ``{"auto": n, "fast": n, "expert": n, "heavy": n,
         "grok_4_3": n, "console": n}``. Negative values (-1 = unknown) are
-        treated as 0.
+        treated as 0. Disabled/expired accounts are excluded — their stored
+        quota is not selectable and is hidden in the per-row view.
         """
         cols = {
             "auto": self.quota_auto_by_idx,
@@ -496,7 +497,12 @@ class AccountRuntimeTable:
             "console": self.quota_console_by_idx,
         }
         totals = {mode: 0 for mode in cols}
+        active_id = int(StatusId.ACTIVE)
+        cooling_id = int(StatusId.COOLING)
         for idx in self.iter_live_indices():
+            sid = int(self.status_by_idx[idx])
+            if sid != active_id and sid != cooling_id:
+                continue
             for mode, col in cols.items():
                 v = int(col[idx])
                 if v > 0:

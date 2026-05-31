@@ -796,7 +796,9 @@ class SqlAccountRepository:
                 except Exception:
                     continue
                 pool = (
-                    item.pool if item.pool in ("basic", "super", "heavy") else "basic"
+                    item.pool
+                    if item.pool in ("basic", "lite", "super", "heavy")
+                    else "basic"
                 )
                 qs = default_quota_set(pool)
                 row = {
@@ -979,7 +981,21 @@ class SqlAccountRepository:
             if query.pool:
                 stmt = stmt.where(accounts_table.c.pool == query.pool)
             if query.status:
-                stmt = stmt.where(accounts_table.c.status == query.status.value)
+                # The admin "disabled" chip groups every non-active/non-cooling
+                # status (expired + disabled), so filter by group rather than an
+                # exact match. The cooling/active split here uses the persisted
+                # status; a cooling row whose cooldown just expired (effective
+                # ACTIVE) stays under "cooling" until the background sync rewrites
+                # it — a short-lived window, and the stats card (runtime table)
+                # already reflects the effective status.
+                if query.status == AccountStatus.DISABLED:
+                    stmt = stmt.where(
+                        accounts_table.c.status.notin_(
+                            [AccountStatus.ACTIVE.value, AccountStatus.COOLING.value]
+                        )
+                    )
+                else:
+                    stmt = stmt.where(accounts_table.c.status == query.status.value)
             # tags stored as a JSON array string, e.g. ["nsfw"]; match the
             # quoted element. .like() binds the pattern as a parameter (safe).
             for tag in query.tags:

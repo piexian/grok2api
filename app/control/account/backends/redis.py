@@ -17,6 +17,7 @@ from ..commands import (
     ListAccountsQuery,
 )
 from ..enums import AccountStatus
+from ..state_machine import derive_status
 from ..models import (
     AccountChangeSet,
     AccountMutationResult,
@@ -258,7 +259,9 @@ class RedisAccountRepository:
                 ).token
             except ValueError:
                 continue
-            pool = item.pool if item.pool in ("basic", "super", "heavy") else "basic"
+            pool = (
+                item.pool if item.pool in ("basic", "lite", "super", "heavy") else "basic"
+            )
             qs = default_quota_set(pool)
             ts = now_ms()
             record = AccountRecord(
@@ -438,8 +441,15 @@ class RedisAccountRepository:
                 continue
             if query.pool and r.pool != query.pool:
                 continue
-            if query.status and r.status != query.status:
-                continue
+            if query.status:
+                # In-memory scan, so use the true effective status. The
+                # "disabled" chip groups all non-active/non-cooling statuses.
+                eff = derive_status(r)
+                if query.status == AccountStatus.DISABLED:
+                    if eff in (AccountStatus.ACTIVE, AccountStatus.COOLING):
+                        continue
+                elif eff != query.status:
+                    continue
             if query.tags and not set(query.tags).issubset(r.tags):
                 continue
             if query.exclude_tags and set(query.exclude_tags) & set(r.tags):

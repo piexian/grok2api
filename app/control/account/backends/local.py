@@ -218,7 +218,9 @@ class LocalAccountRepository:
                 ).token
             except ValueError:
                 continue
-            pool = item.pool if item.pool in ("basic", "super", "heavy") else "basic"
+            pool = (
+                item.pool if item.pool in ("basic", "lite", "super", "heavy") else "basic"
+            )
             qs = default_quota_set(pool)
             conn.execute(
                 f"""
@@ -554,8 +556,16 @@ class LocalAccountRepository:
                     where_parts.append("pool = ?")
                     params.append(query.pool)
                 if query.status:
-                    where_parts.append("status = ?")
-                    params.append(query.status.value)
+                    # "disabled" chip groups all non-active/non-cooling statuses
+                    # (expired + disabled); other filters match exactly. Bound
+                    # params keep this injection-safe.
+                    if query.status == AccountStatus.DISABLED:
+                        where_parts.append("status NOT IN (?, ?)")
+                        params.append(AccountStatus.ACTIVE.value)
+                        params.append(AccountStatus.COOLING.value)
+                    else:
+                        where_parts.append("status = ?")
+                        params.append(query.status.value)
                 # tags stored as a JSON array string, e.g. ["nsfw"]; match the
                 # quoted element to avoid substring collisions across tag names.
                 for tag in query.tags:

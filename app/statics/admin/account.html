@@ -1222,6 +1222,13 @@ async function loadPage() {
       page: Number(data.page ?? 1) || 1,
       total_pages: Number(data.total_pages ?? 1) || 1,
     };
+    // Totals can shrink (delete / batch-disable) while we sit on a later page;
+    // the server echoes the requested (out-of-range) page, so clamp and reload.
+    // total_pages is >=1 even at zero results, so this also recovers empty pages.
+    if (pageMeta.page > pageMeta.total_pages) {
+      curPage = pageMeta.total_pages;
+      return loadPage();
+    }
     curPage = pageMeta.page;
     renderTable();
   } catch (e) {
@@ -1262,6 +1269,7 @@ function getStatsView() {
   const quota = s.quota || {};
   return {
     stats: {
+      total: s.total || 0,
       active: s.active || 0,
       cooling: s.cooling || 0,
       disabled: s.disabled || 0,
@@ -1302,7 +1310,7 @@ function isQuotaCountedStatus(status) {
 
 function renderStats(view = getStatsView()) {
   const { stats } = view;
-  $('s-total',   pageMeta.total);
+  $('s-total',   stats.total);
   $('s-active',  stats.active);
   $('s-cooling', stats.cooling);
   $('s-disabled', stats.disabled);

@@ -215,6 +215,10 @@ class AccountRecord(BaseModel):
         return "nsfw" in self.tags
 
     @property
+    def is_lite(self) -> bool:
+        return self.pool == "lite"
+
+    @property
     def is_super(self) -> bool:
         return self.pool == "super"
 
@@ -273,7 +277,9 @@ class AccountRecord(BaseModel):
     @classmethod
     def _normalize_pool(cls, v: Any) -> str:
         val = str(v or "").strip().lower()
-        if val in ("super"):
+        if val in ("lite",):
+            return "lite"
+        if val in ("super",):
             return "super"
         if val in ("heavy",):
             return "heavy"
