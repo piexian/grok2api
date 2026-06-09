@@ -254,6 +254,7 @@
     "importDone": "Importación completada",
     "importJsonDone": "Importación completada: {n} cuentas procesadas",
     "importFailed": "La importación falló",
+    "importPartialFailed": "{processed} procesados; {unfinished} sin finalizar. Inténtalo de nuevo.",
     "saving": "Guardando cambios…",
     "editDone": "Cambios guardados",
     "editFailed": "No se pudieron guardar los cambios",

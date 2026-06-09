@@ -170,6 +170,7 @@ class AdminAccountPaginationExportTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('<option value="2000">2000 / 页</option>', html)
         self.assertIn("const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000];", html)
         self.assertIn("const EXPORT_PAGE_SIZE = 2000;", html)
+        self.assertIn("const IMPORT_BATCH_SIZE = 500;", html)
         self.assertIn("function buildTokenQueryForPage(page, size)", html)
         self.assertIn("async function fetchAllFiltered()", html)
         self.assertIn("buildTokenQueryForPage(page, EXPORT_PAGE_SIZE)", html)
@@ -188,6 +189,19 @@ class AdminAccountPaginationExportTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("curPools.add(pool);", html)
         self.assertIn("curPools.delete(pool);", html)
         self.assertIn('aria-pressed="${active ? \'true\' : \'false\'}"', html)
+
+    def test_account_page_import_and_delete_show_progress(self):
+        html = Path("app/statics/admin/account.html").read_text()
+
+        self.assertIn("const IMPORT_BATCH_SIZE = 500;", html)
+        self.assertIn("const DELETE_BATCH_SIZE = 500;", html)
+        self.assertIn("const progress = showProgressToast(pendingMessage);", html)
+        self.assertIn("unique.slice(offset, offset + IMPORT_BATCH_SIZE)", html)
+        self.assertIn("progress.update(processed, total);", html)
+        self.assertIn("const progress = showProgressToast(tr('account.deleting'", html)
+        self.assertIn("uniqueTokens.slice(offset, offset + DELETE_BATCH_SIZE)", html)
+        self.assertIn("progress.update(processed, n);", html)
+        self.assertIn("account.importPartialFailed", html)
 
     async def test_admin_delete_tokens_accepts_raw_jwt_lines_and_sso_prefixes(self):
         raw_jwt_a = (

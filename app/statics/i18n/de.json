@@ -254,6 +254,7 @@
     "importDone": "Import abgeschlossen",
     "importJsonDone": "Import abgeschlossen: {n} Konten verarbeitet",
     "importFailed": "Import fehlgeschlagen",
+    "importPartialFailed": "{processed} verarbeitet; {unfinished} nicht abgeschlossen. Erneut versuchen.",
     "saving": "Änderungen werden gespeichert…",
     "editDone": "Änderungen gespeichert",
     "editFailed": "Änderungen konnten nicht gespeichert werden",

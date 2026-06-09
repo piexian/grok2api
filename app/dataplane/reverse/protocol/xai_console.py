@@ -264,6 +264,19 @@ def convert_openai_tool_choice(tool_choice: Any) -> Any:
 # Payload builder
 # ---------------------------------------------------------------------------
 
+_REASONING_EFFORT_UNSUPPORTED_MODELS = {
+    # Upstream rejects `reasoning.effort`/`reasoningEffort` for these Console
+    # model ids with HTTP 400. Keep this at the protocol layer so every caller
+    # path avoids the unsupported field, including explicit client defaults.
+    "grok-4.20",
+    "grok-4.20-0309-reasoning",
+    "grok-4.20-0309-non-reasoning",
+}
+
+
+def console_model_supports_reasoning_effort(console_model: str) -> bool:
+    return console_model not in _REASONING_EFFORT_UNSUPPORTED_MODELS
+
 
 def build_console_payload(
     *,
@@ -307,10 +320,15 @@ def build_console_payload(
         payload["temperature"] = temperature
     if top_p is not None:
         payload["top_p"] = top_p
-    # Console upstream accepts effort ∈ {"minimal", "low", "medium", "high"}.
-    # Map project-specific values: "none" → omit (emit_think handles client-side
-    # suppression separately); "xhigh" → "high" (upstream cap).
-    if reasoning_effort and reasoning_effort != "none":
+    # Console upstream accepts effort ∈ {"minimal", "low", "medium", "high"}
+    # only for model ids that expose this control. Map project-specific values:
+    # "none" → omit (emit_think handles client-side suppression separately);
+    # "xhigh" → "high" (upstream cap).
+    if (
+        reasoning_effort
+        and reasoning_effort != "none"
+        and console_model_supports_reasoning_effort(console_model)
+    ):
         upstream_effort = "high" if reasoning_effort == "xhigh" else reasoning_effort
         payload["reasoning"] = {"effort": upstream_effort}
     if tools:
@@ -876,6 +894,7 @@ class ConsoleStreamAdapter:
 __all__ = [
     "build_console_input",
     "build_console_payload",
+    "console_model_supports_reasoning_effort",
     "convert_openai_tools_to_console",
     "convert_openai_tool_choice",
     "inject_web_search_tool",

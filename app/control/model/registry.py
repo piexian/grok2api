@@ -39,12 +39,11 @@ MODELS: tuple[ModelSpec, ...] = (
     # === Console API (console.x.ai/v1/responses) ============================
     # 通过 SSO cookie 直接调用 console.x.ai，basic 账号即可使用所有模型
     # 速率限制由 console.x.ai 控制（免费 tier: 1 rps / 60 RPM）
-    # Hybrid reasoning models default to effort="high" so callers that omit
-    # reasoning_effort still get the "think hard" experience the model name
-    # implies. Pass an explicit value (e.g. "minimal") to override.
+    # Console effort support is model-specific. grok-4/grok-4.3 accept
+    # reasoning.effort; grok-4.20 rejects it with HTTP 400.
     ModelSpec("grok-4.3",                               ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.3 (Console)",                    console_model="grok-4.3",                       default_reasoning_effort="high"),
     ModelSpec("grok-4",                                 ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4 (Console)",                      console_model="grok-4",                         default_reasoning_effort="high"),
-    ModelSpec("grok-4.20",                              ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 (Console)",                   console_model="grok-4.20",                      default_reasoning_effort="high"),
+    ModelSpec("grok-4.20",                              ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 (Console)",                   console_model="grok-4.20"),
     # Fixed-intensity reasoning model — upstream rejects reasoning.effort.
     ModelSpec("grok-4.20-reasoning",                    ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Reasoning (Console)",         console_model="grok-4.20-0309-reasoning"),
     # Non-reasoning model — effort is not applicable.

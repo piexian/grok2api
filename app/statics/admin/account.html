@@ -1219,6 +1219,7 @@
 const PAGE_SIZE_KEY = 'admin.account.page_size';
 const PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000];
 const EXPORT_PAGE_SIZE = 2000;
+const IMPORT_BATCH_SIZE = 500;
 const DELETE_BATCH_SIZE = 500;
 const SORT_FIELDS = new Set(['usage_use_count', 'usage_fail_count', 'success_rate', 'last_use_at']);
 
@@ -1942,13 +1943,18 @@ async function doImport() {
     let total = 0;
     Object.values(parsed).forEach(arr => { if (Array.isArray(arr)) total += arr.length; });
     if (!total) return showToast(tr('account.jsonEmpty', null, 'JSON 文件中没有可导入的 Token'), 'error');
+    const progress = showProgressToast(tr('account.importing', { n: total }, `正在导入 ${total} 个账户…`));
+    progress.update(0, total);
     try {
-      showToast(tr('account.importing', { n: total }, `正在导入 ${total} 个账户…`), 'info');
-      await _api('POST', '/tokens', parsed);
+      const d = await _api('POST', '/tokens', parsed);
+      const done = Number(d.count ?? total) || total;
+      progress.update(done, total);
       closeModal('modal-import-file');
-      showToast(tr('account.importJsonDone', { n: total }, `导入完成，共 ${total} 个`), 'success');
-      load();
-    } catch (e) { showToast(`${tr('account.importFailed', null, '导入失败')}: ${e.message}`, 'error'); }
+      progress.finish(tr('account.importJsonDone', { n: done }, `导入完成，共 ${done} 个`), 'success');
+      await load();
+    } catch (e) {
+      progress.finish(`${tr('account.importFailed', null, '导入失败')}: ${e.message}`, 'error');
+    }
   } else {
     // TXT 格式: 每行一个 token
     const pool = document.getElementById('import-file-pool').value;
@@ -2037,17 +2043,33 @@ function updateImportFileState() {
 }
 
 async function saveTokens(pool, newToks, modalId, pendingMessage, successPrefix, errorPrefix) {
-  const unique = [...new Set(newToks)];
+  const unique = [...new Set(newToks)].filter(Boolean);
+  const total = unique.length;
+  const progress = showProgressToast(pendingMessage);
+  progress.update(0, total);
+  let processed = 0;
+  let added = 0;
+  let skipped = 0;
   try {
-    showToast(pendingMessage, 'info');
-    const d = await _api('POST', '/tokens/add', { pool, tokens: unique });
+    for (let offset = 0; offset < unique.length; offset += IMPORT_BATCH_SIZE) {
+      const batch = unique.slice(offset, offset + IMPORT_BATCH_SIZE);
+      const d = await _api('POST', '/tokens/add', { pool, tokens: batch });
+      added += Number(d.count ?? 0) || 0;
+      skipped += Number(d.skipped ?? Math.max(0, batch.length - Number(d.count ?? 0))) || 0;
+      processed += batch.length;
+      progress.update(processed, total);
+    }
     closeModal(modalId);
-    const msg = d.skipped
-      ? tr('account.saveResultSkipped', { prefix: successPrefix, count: d.count, skipped: d.skipped }, `${successPrefix}，新增 ${d.count}，已存在跳过 ${d.skipped}`)
-      : tr('account.saveResult', { prefix: successPrefix, count: d.count }, `${successPrefix}，新增 ${d.count} 个`);
-    showToast(msg, 'success');
-    load();
-  } catch (e) { showToast(`${errorPrefix}: ${e.message}`, 'error'); }
+    const msg = skipped
+      ? tr('account.saveResultSkipped', { prefix: successPrefix, count: added, skipped }, `${successPrefix}，新增 ${added}，已存在跳过 ${skipped}`)
+      : tr('account.saveResult', { prefix: successPrefix, count: added }, `${successPrefix}，新增 ${added} 个`);
+    progress.finish(msg, 'success');
+    await load();
+  } catch (e) {
+    if (processed > 0) await load().catch(() => {});
+    const unfinished = Math.max(0, total - processed);
+    progress.finish(`${errorPrefix}: ${e.message}; ${tr('account.importPartialFailed', { processed, unfinished }, `已处理 ${processed} 个，${unfinished} 个未完成，请重试`)}`, 'error');
+  }
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
@@ -2109,8 +2131,10 @@ async function deleteTokens(tokens, modalId) {
   let deleted = 0;
   let requested = 0;
   let missing = 0;
+  let processed = 0;
+  const progress = showProgressToast(tr('account.deleting', { n }, `正在删除 ${n} 个账户…`));
+  progress.update(0, n);
   try {
-    showToast(tr('account.deleting', { n }, `正在删除 ${n} 个账户…`), 'info');
     for (let offset = 0; offset < uniqueTokens.length; offset += DELETE_BATCH_SIZE) {
       const batch = uniqueTokens.slice(offset, offset + DELETE_BATCH_SIZE);
       const result = await _api('DELETE', '/tokens', batch);
@@ -2119,21 +2143,23 @@ async function deleteTokens(tokens, modalId) {
       requested += batchRequested;
       deleted += batchDeleted;
       missing += Number(result.missing ?? Math.max(0, batchRequested - batchDeleted)) || 0;
+      processed += batch.length;
+      progress.update(processed, n);
     }
   } catch (e) {
     if (deleted > 0) {
       if (modalId) closeModal(modalId);
       await load().catch(() => {});
-      const unfinished = Math.max(0, n - requested);
-      showToast(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}; ${tr('account.deletePartialFailed', { deleted, unfinished }, `已删除 ${deleted} 个，${unfinished} 个未完成，请重试`)}`, 'error');
+      const unfinished = Math.max(0, n - processed);
+      progress.finish(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}; ${tr('account.deletePartialFailed', { deleted, unfinished }, `已删除 ${deleted} 个，${unfinished} 个未完成，请重试`)}`, 'error');
       return;
     }
-    showToast(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}`, 'error');
+    progress.finish(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}`, 'error');
     return;
   }
   try {
     if (!deleted) {
-      showToast(tr('account.deleteNoMatch', null, '未匹配到可删除的 SSO，请确认粘贴的是完整 Token'), 'error');
+      progress.finish(tr('account.deleteNoMatch', null, '未匹配到可删除的 SSO，请确认粘贴的是完整 Token'), 'error');
       return;
     }
     uniqueTokens.forEach(t => {
@@ -2146,9 +2172,9 @@ async function deleteTokens(tokens, modalId) {
     const message = missing
       ? tr('account.deletePartialDone', { deleted, missing }, `已删除 ${deleted} 个，${missing} 个未匹配`)
       : tr('account.deleteDone', { n: deleted }, `已删除 ${deleted} 个`);
-    showToast(message, missing ? 'info' : 'success');
+    progress.finish(message, 'success');
   } catch (e) {
-    showToast(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}`, 'error');
+    progress.finish(`${tr('account.deleteFailed', null, '删除失败')}: ${e.message}`, 'error');
   }
 }
 

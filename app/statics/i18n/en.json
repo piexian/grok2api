@@ -255,6 +255,7 @@
     "importDone": "Import completed",
     "importJsonDone": "Import completed: {n} accounts processed",
     "importFailed": "Import failed",
+    "importPartialFailed": "{processed} processed; {unfinished} unfinished. Try again.",
     "saving": "Saving changes…",
     "editDone": "Changes saved",
     "editFailed": "Failed to save changes",

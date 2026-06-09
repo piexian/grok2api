@@ -254,6 +254,7 @@
     "importDone": "インポートが完了しました",
     "importJsonDone": "インポート完了: {n} 件を処理しました",
     "importFailed": "インポートに失敗しました",
+    "importPartialFailed": "{processed} 件を処理しました。{unfinished} 件は未完了です。再試行してください。",
     "saving": "変更を保存しています…",
     "editDone": "変更を保存しました",
     "editFailed": "変更の保存に失敗しました",
