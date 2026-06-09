@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Version](https://img.shields.io/badge/version-2.0.5-111827)](../pyproject.toml)
+[![Version](https://img.shields.io/badge/version-2.0.8-111827)](../pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-16a34a)](../LICENSE)
 [![中文](https://img.shields.io/badge/中文-2563EB?logo=bookstack&logoColor=white)](../README.md)
 [![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chenyme/grok2api)
@@ -25,7 +25,7 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok Web capabilities 
 
 <br>
 
-## 2.0.5 Highlights
+## 2.0.8 Highlights
 
 > Major changes since `v2.0.4.rc4`.
 
@@ -37,7 +37,7 @@ Grok2API is a **FastAPI**-based Grok gateway that exposes Grok Web capabilities 
 - Invalid account handling now auto-disables known unusable credentials such as `invalid-credentials`, `bad-credentials`, missing sessions, revoked tokens, blocked users, and suspended accounts. The previous abnormal-account card/filter was removed, and historical abnormal / expired statuses are folded into disabled accounts.
 - console.x.ai `402` responses are treated as quota exhaustion so account selection can route around depleted Console credits.
 - The WebUI model dropdown is filtered by currently available account tiers to avoid selecting models with no matching account pool.
-- Current prebuilt image: `ghcr.io/piexian/grok2api:2.0.5`; `ghcr.io/piexian/grok2api:latest` points to the same image.
+- Current prebuilt image: `ghcr.io/piexian/grok2api:2.0.8`; `ghcr.io/piexian/grok2api:latest` points to the same image.
 
 <br>
 
@@ -140,8 +140,8 @@ docker run -d \
 
 | Image | Description |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to `2.0.5` |
-| `ghcr.io/piexian/grok2api:2.0.5` | Fixed version tag |
+| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to `2.0.8` |
+| `ghcr.io/piexian/grok2api:2.0.8` | Fixed version tag |
 
 ### Vercel
 

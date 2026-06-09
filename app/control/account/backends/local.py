@@ -28,6 +28,11 @@ _TBL = "accounts"
 _META = "account_meta"
 _META_REVISION_KEY = "revision"
 _META_GLOBAL_SUCCESS_COUNT_KEY = "global_success_count"
+_SUCCESS_RATE_SQL = (
+    "CASE WHEN (usage_use_count + usage_fail_count) > 0 "
+    "THEN (1.0 * usage_use_count / (usage_use_count + usage_fail_count)) "
+    "ELSE 0 END"
+)
 
 
 class LocalAccountRepository:
@@ -487,6 +492,76 @@ class LocalAccountRepository:
 
         return await asyncio.to_thread(_sync)
 
+    async def needs_grok_4_3_quota_backfill(self) -> bool:
+        def _sync() -> bool:
+            with closing(self._connect()) as conn:
+                row = conn.execute(
+                    f"""
+                    SELECT 1
+                    FROM {_TBL}
+                    WHERE deleted_at IS NULL
+                      AND pool IN ('super', 'heavy')
+                      AND (
+                        quota_grok_4_3 IS NULL
+                        OR quota_grok_4_3 = ''
+                        OR quota_grok_4_3 = '{{}}'
+                      )
+                    LIMIT 1
+                    """
+                ).fetchone()
+                return row is not None
+
+        return await asyncio.to_thread(_sync)
+
+    async def needs_basic_fast_only_quota_normalization(self) -> bool:
+        def _json_int(column: str, path: str, *, invalid: int = 0) -> str:
+            return (
+                f"CASE WHEN json_valid({column}) "
+                f"THEN CAST(COALESCE(json_extract({column}, '{path}'), 0) AS INTEGER) "
+                f"ELSE {invalid} END"
+            )
+
+        def _sync() -> bool:
+            fast_total = _json_int("quota_fast", "$.total", invalid=-1)
+            fast_window = _json_int("quota_fast", "$.window_seconds", invalid=-1)
+            console_total = _json_int("quota_console", "$.total", invalid=-1)
+            console_window = _json_int(
+                "quota_console", "$.window_seconds", invalid=-1
+            )
+            row = None
+            with closing(self._connect()) as conn:
+                try:
+                    row = conn.execute(
+                        f"""
+                        SELECT 1
+                        FROM {_TBL}
+                        WHERE deleted_at IS NULL
+                          AND pool = 'basic'
+                          AND (
+                            NOT json_valid(quota_auto)
+                            OR NOT json_valid(quota_fast)
+                            OR NOT json_valid(quota_expert)
+                            OR NOT json_valid(quota_heavy)
+                            OR NOT json_valid(quota_grok_4_3)
+                            OR NOT json_valid(quota_console)
+                            OR {_json_int("quota_auto", "$.total")} != 0
+                            OR {_json_int("quota_expert", "$.total")} != 0
+                            OR {_json_int("quota_heavy", "$.total")} != 0
+                            OR {_json_int("quota_grok_4_3", "$.total")} != 0
+                            OR {fast_total} != 30
+                            OR {fast_window} != 86400
+                            OR {console_total} != 30
+                            OR {console_window} != 900
+                          )
+                        LIMIT 1
+                        """
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    return True
+            return row is not None
+
+        return await asyncio.to_thread(_sync)
+
     async def scan_changes(
         self,
         since_revision: int,
@@ -563,12 +638,14 @@ class LocalAccountRepository:
             ts = now_ms()
             with closing(self._connect()) as conn:
                 rev = self._bump_revision(conn)
-                conn.executemany(
-                    f"UPDATE {_TBL} SET deleted_at = ?, updated_at = ?, revision = ? "
-                    f"WHERE token = ? AND deleted_at IS NULL",
-                    [(ts, ts, rev, t) for t in tokens],
-                )
-                count = conn.execute("SELECT changes()").fetchone()[0]
+                count = 0
+                for token in dict.fromkeys(tokens):
+                    conn.execute(
+                        f"UPDATE {_TBL} SET deleted_at = ?, updated_at = ?, revision = ? "
+                        f"WHERE token = ? AND deleted_at IS NULL",
+                        (ts, ts, rev, token),
+                    )
+                    count += conn.execute("SELECT changes()").fetchone()[0]
                 conn.commit()
                 return AccountMutationResult(deleted=count, revision=rev)
 
@@ -604,9 +681,20 @@ class LocalAccountRepository:
 
                 if not query.include_deleted:
                     where_parts.append("deleted_at IS NULL")
-                if query.pool:
+                pool_filters = [
+                    p
+                    for p in dict.fromkeys(
+                        query.pools or ([query.pool] if query.pool else [])
+                    )
+                    if p
+                ]
+                if len(pool_filters) == 1:
                     where_parts.append("pool = ?")
-                    params.append(query.pool)
+                    params.append(pool_filters[0])
+                elif pool_filters:
+                    placeholders = ",".join("?" * len(pool_filters))
+                    where_parts.append(f"pool IN ({placeholders})")
+                    params.extend(pool_filters)
                 if query.status:
                     # "disabled" chip groups all non-active/non-cooling statuses
                     # (expired + disabled); other filters match exactly. Bound
@@ -631,20 +719,15 @@ class LocalAccountRepository:
                     ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
                 )
                 order_dir = "DESC" if query.sort_desc else "ASC"
-                # Allow only known column names to prevent injection.
-                safe_sort = (
-                    query.sort_by
-                    if query.sort_by
-                    in {
-                        "updated_at",
-                        "created_at",
-                        "last_use_at",
-                        "token",
-                        "usage_use_count",
-                        "usage_fail_count",
-                    }
-                    else "updated_at"
-                )
+                safe_sort = {
+                    "updated_at": "updated_at",
+                    "created_at": "created_at",
+                    "last_use_at": "last_use_at",
+                    "token": "token",
+                    "usage_use_count": "usage_use_count",
+                    "usage_fail_count": "usage_fail_count",
+                    "success_rate": _SUCCESS_RATE_SQL,
+                }.get(query.sort_by, "updated_at")
                 order_sql = f"ORDER BY {safe_sort} {order_dir}"
 
                 total = conn.execute(

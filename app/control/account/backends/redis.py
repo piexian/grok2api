@@ -36,6 +36,17 @@ _KEY_POOL = "accounts:pool:{pool}"
 _KEY_REV_LOG = "accounts:revision_log"
 
 
+def _success_rate(record: AccountRecord) -> float:
+    total = record.usage_use_count + record.usage_fail_count
+    return record.usage_use_count / total if total else 0
+
+
+def _sort_value(record: AccountRecord, sort_key: str):
+    if sort_key == "success_rate":
+        return _success_rate(record)
+    return getattr(record, sort_key, 0) or 0
+
+
 def _record_key(token: str) -> str:
     return f"accounts:record:{token}"
 
@@ -519,6 +530,9 @@ class RedisAccountRepository:
     ) -> AccountPage:
         # Full scan — Redis is not optimised for filtered listing.
         all_records: list[AccountRecord] = []
+        pool_filters = {
+            p for p in (query.pools or ([query.pool] if query.pool else [])) if p
+        }
         async for key in self._r.scan_iter("accounts:record:*"):
             token = (key.decode() if isinstance(key, bytes) else key).split(":", 2)[-1]
             h = await self._r.hgetall(key)
@@ -527,7 +541,7 @@ class RedisAccountRepository:
             r = self._from_hash(token, h)
             if not query.include_deleted and r.is_deleted():
                 continue
-            if query.pool and r.pool != query.pool:
+            if pool_filters and r.pool not in pool_filters:
                 continue
             if query.status:
                 # In-memory scan, so use the true effective status. The
@@ -547,7 +561,7 @@ class RedisAccountRepository:
         # Sort.
         sort_key = query.sort_by
         all_records.sort(
-            key=lambda r: getattr(r, sort_key, 0) or 0,
+            key=lambda r: _sort_value(r, sort_key),
             reverse=query.sort_desc,
         )
         total = len(all_records)

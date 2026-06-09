@@ -78,6 +78,16 @@ meta_table = sa.Table(
     sa.Column("value", sa.Text, nullable=False),
 )
 
+_USAGE_TOTAL_EXPR = accounts_table.c.usage_use_count + accounts_table.c.usage_fail_count
+_SUCCESS_RATE_EXPR = sa.case(
+    (
+        _USAGE_TOTAL_EXPR > 0,
+        sa.cast(accounts_table.c.usage_use_count, sa.Float) / _USAGE_TOTAL_EXPR,
+    ),
+    else_=0.0,
+)
+_BULK_DELETE_CHUNK_SIZE = 1000
+
 _SQL_SSL_MODE_PARAM_KEYS = ("sslmode", "ssl-mode", "ssl")
 _PG_SSL_CERT_PARAM_KEYS = ("sslrootcert", "sslcert", "sslkey")
 _PG_SSL_UNSUPPORTED_PARAM_KEYS = (
@@ -1040,21 +1050,28 @@ class SqlAccountRepository:
         self,
         tokens: list[str],
     ) -> AccountMutationResult:
+        tokens = list(dict.fromkeys(t for t in tokens if t))
         if not tokens:
             return AccountMutationResult()
         await self._ensure_initialized()
         async with self._engine.begin() as conn:
             rev = await self._bump_revision(conn)
             ts = now_ms()
-            result = await conn.execute(
-                accounts_table.update()
-                .where(
-                    accounts_table.c.token.in_(tokens),
-                    accounts_table.c.deleted_at.is_(None),
+            count = 0
+            for offset in range(0, len(tokens), _BULK_DELETE_CHUNK_SIZE):
+                chunk = tokens[offset : offset + _BULK_DELETE_CHUNK_SIZE]
+                result = await conn.execute(
+                    accounts_table.update()
+                    .where(
+                        accounts_table.c.token.in_(chunk),
+                        accounts_table.c.deleted_at.is_(None),
+                    )
+                    .values(deleted_at=ts, updated_at=ts, revision=rev)
                 )
-                .values(deleted_at=ts, updated_at=ts, revision=rev)
-            )
-            return AccountMutationResult(deleted=result.rowcount, revision=rev)
+                rowcount = result.rowcount
+                if rowcount and rowcount > 0:
+                    count += rowcount
+            return AccountMutationResult(deleted=count, revision=rev)
 
     async def get_accounts(
         self,
@@ -1080,8 +1097,15 @@ class SqlAccountRepository:
             stmt = sa.select(accounts_table)
             if not query.include_deleted:
                 stmt = stmt.where(accounts_table.c.deleted_at.is_(None))
-            if query.pool:
-                stmt = stmt.where(accounts_table.c.pool == query.pool)
+            pool_filters = [
+                p
+                for p in dict.fromkeys(
+                    query.pools or ([query.pool] if query.pool else [])
+                )
+                if p
+            ]
+            if pool_filters:
+                stmt = stmt.where(accounts_table.c.pool.in_(pool_filters))
             if query.status:
                 # The admin "disabled" chip groups every non-active/non-cooling
                 # status (expired + disabled), so filter by group rather than an
@@ -1112,8 +1136,14 @@ class SqlAccountRepository:
             ).scalar()
             total = int(total_row or 0)
 
-            sort_col = getattr(
-                accounts_table.c, query.sort_by, accounts_table.c.updated_at
+            sort_col = (
+                _SUCCESS_RATE_EXPR
+                if query.sort_by == "success_rate"
+                else getattr(
+                    accounts_table.c,
+                    query.sort_by,
+                    accounts_table.c.updated_at,
+                )
             )
             if query.sort_desc:
                 stmt = stmt.order_by(sort_col.desc())

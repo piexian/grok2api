@@ -61,6 +61,7 @@ class ListAccountsQuery(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=2000)
     pool: str | None = None
+    pools: list[str] = Field(default_factory=list)
     status: AccountStatus | None = None
     tags: list[str] = Field(default_factory=list)  # must contain ALL
     exclude_tags: list[str] = Field(default_factory=list)  # must contain NONE

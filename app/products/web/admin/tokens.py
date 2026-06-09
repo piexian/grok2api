@@ -63,7 +63,10 @@ _STRIP_RE = re.compile(r"\s+")
 def _sanitize(value: str) -> str:
     tok = str(value or "").translate(_TOKEN_TRANS)
     tok = _STRIP_RE.sub("", tok)
-    if tok.startswith("sso="):
+    lower = tok.lower()
+    if lower.startswith("sso-rw="):
+        tok = tok[7:]
+    elif lower.startswith("sso="):
         tok = tok[4:]
     return tok.encode("ascii", errors="ignore").decode("ascii")
 
@@ -151,6 +154,7 @@ def _serialize_record(r) -> dict:
         "status": status,
         "quota": quota,
         "use_count": r.usage_use_count or 0,
+        "fail_count": r.usage_fail_count or 0,
         "last_used_at": r.last_use_at,
         "tags": r.tags or [],
     }
@@ -169,8 +173,9 @@ def _json(data) -> Response:
 @router.get("/tokens")
 async def list_tokens(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=2000),
     pool: str | None = Query(None),
+    pools: str | None = Query(None, description="comma-separated account pools"),
     status: str | None = Query(None),
     tags: str | None = Query(
         None, description="comma-separated; account must have ALL"
@@ -188,10 +193,17 @@ async def list_tokens(
     except ValueError:
         status_enum = None
 
+    pool_value = (pool or "").strip() or None
+    pool_values = list(
+        dict.fromkeys(
+            p.strip() for p in (pools or "").split(",") if p.strip()
+        )
+    )
     query = ListAccountsQuery(
         page=page,
         page_size=page_size,
-        pool=pool or None,
+        pool=pool_value,
+        pools=pool_values,
         status=status_enum,
         tags=[t for t in (tags or "").split(",") if t.strip()],
         exclude_tags=[t for t in (exclude_tags or "").split(",") if t.strip()],
@@ -318,12 +330,25 @@ async def delete_tokens(
     tokens: list[str] = Body(...),
     repo: "AccountRepository" = Depends(get_repo),
 ):
-    cleaned = [t for t in (_sanitize(t) for t in tokens) if t]
+    cleaned = list(dict.fromkeys(t for t in (_sanitize(t) for t in tokens) if t))
     if not cleaned:
         raise ValidationError("No valid tokens provided", param="tokens")
-    await repo.delete_accounts(cleaned)
-    logger.info("admin tokens deleted: deleted_count={}", len(cleaned))
-    return _json({"deleted": len(cleaned)})
+    result = await repo.delete_accounts(cleaned)
+    missing = max(0, len(cleaned) - result.deleted)
+    logger.info(
+        "admin tokens deleted: requested_count={} deleted_count={} missing_count={}",
+        len(cleaned),
+        result.deleted,
+        missing,
+    )
+    return _json(
+        {
+            "deleted": result.deleted,
+            "requested": len(cleaned),
+            "missing": missing,
+            "revision": result.revision,
+        }
+    )
 
 
 @router.put("/tokens/edit")
