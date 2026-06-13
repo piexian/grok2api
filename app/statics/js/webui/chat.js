@@ -40,6 +40,10 @@
   let activeEdit = null;
   const PROMPT_MIN_HEIGHT = 36;
   const PROMPT_MAX_HEIGHT = 108;
+  const CHAT_MEDIA_WIDTH = 400;
+  const CHAT_MEDIA_HEIGHT = 240;
+  const CHAT_THUMB_WIDTH = 196;
+  const CHAT_THUMB_HEIGHT = 147;
   let pendingThreadScrollFrame = 0;
   let sessionListRenderSignature = '';
 
@@ -515,7 +519,7 @@
         if (textContent.trim()) parts.push(renderRichMarkdown(textContent));
         if (imageUrls.length) {
           parts.push(imageUrls.map((url) => (
-            `<div class="msg-inline-media"><img src="${escapeHtml(url)}" alt="image" loading="lazy"></div>`
+            `<div class="msg-inline-media"><img src="${escapeHtml(url)}" alt="image" loading="lazy" width="${CHAT_MEDIA_WIDTH}" height="${CHAT_MEDIA_HEIGHT}"></div>`
           )).join(''));
         }
         card.innerHTML = parts.join('') || '<p></p>';
@@ -539,6 +543,8 @@
           img.src = url;
           img.alt = 'image';
           img.loading = 'lazy';
+          img.width = CHAT_THUMB_WIDTH;
+          img.height = CHAT_THUMB_HEIGHT;
           gallery.appendChild(img);
         });
         body.appendChild(gallery);
@@ -613,6 +619,26 @@
         : [],
     }));
     localStorage.setItem(STORE_KEY, JSON.stringify({ sessions: serializedSessions, currentSessionId }));
+  }
+
+  function readSessionIdFromUrl() {
+    try {
+      return new URLSearchParams(window.location.search).get('session') || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function syncSessionUrl(id = currentSessionId) {
+    if (!id || !window.history?.replaceState) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('session') === id) return;
+    url.searchParams.set('session', id);
+    window.history.replaceState({}, '', url);
+  }
+
+  function canAutofocusPrompt() {
+    return window.matchMedia?.('(pointer: fine)').matches && !window.matchMedia?.('(max-width: 768px)').matches;
   }
 
   function applySidebarState() {
@@ -949,12 +975,14 @@
     sessionModalConfirm.textContent = confirmLabel || text('webui.chat.confirm', 'Confirm');
     sessionModal.classList.add('open');
     sessionModal.setAttribute('aria-hidden', 'false');
-    if (withInput) {
-      setTimeout(() => {
+    setTimeout(() => {
+      if (withInput) {
         sessionModalInput.focus();
         sessionModalInput.select();
-      }, 0);
-    }
+        return;
+      }
+      sessionModalConfirm.focus();
+    }, 0);
     return new Promise((resolve) => {
       modalResolver = resolve;
     });
@@ -1287,9 +1315,14 @@
     const fragment = document.createDocumentFragment();
 
     sessions.forEach((session) => {
-      const item = document.createElement('button');
-      item.type = 'button';
+      const item = document.createElement('div');
       item.className = `webui-session-item${session.id === currentSessionId ? ' active' : ''}`;
+
+      const selectBtn = document.createElement('button');
+      selectBtn.type = 'button';
+      selectBtn.className = 'webui-session-main';
+      selectBtn.setAttribute('aria-label', session.title || text('webui.chat.untitled', 'New Chat'));
+      if (session.id === currentSessionId) selectBtn.setAttribute('aria-current', 'true');
 
       const title = document.createElement('div');
       title.className = 'webui-session-title';
@@ -1301,6 +1334,7 @@
       renameBtn.type = 'button';
       renameBtn.className = 'webui-session-action';
       renameBtn.title = text('webui.chat.rename', 'Rename');
+      renameBtn.setAttribute('aria-label', text('webui.chat.rename', 'Rename'));
       renameBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10-10-4-4L4 16v4Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m12.5 7.5 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
       renameBtn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1311,6 +1345,7 @@
       deleteBtn.type = 'button';
       deleteBtn.className = 'webui-session-action';
       deleteBtn.title = text('webui.chat.delete', 'Delete');
+      deleteBtn.setAttribute('aria-label', text('webui.chat.delete', 'Delete'));
       deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14M9 7V5h6v2M8 7l1 12h6l1-12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       deleteBtn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1320,9 +1355,10 @@
       actions.appendChild(renameBtn);
       actions.appendChild(deleteBtn);
 
-      item.appendChild(title);
+      selectBtn.appendChild(title);
+      selectBtn.addEventListener('click', () => switchSession(session.id));
+      item.appendChild(selectBtn);
       item.appendChild(actions);
-      item.addEventListener('click', () => switchSession(session.id));
       fragment.appendChild(item);
     });
     sessionList.replaceChildren(fragment);
@@ -1358,9 +1394,10 @@
     resizePromptInput();
     setStatus(text('webui.chat.statusReady', 'Ready'));
     persistStore();
+    syncSessionUrl(session.id);
   }
 
-  function startNewSession() {
+  function startNewSession({ focus = true } = {}) {
     const session = createSession();
     sessions.unshift(session);
     currentSessionId = session.id;
@@ -1373,7 +1410,8 @@
     resizePromptInput();
     setStatus(text('webui.chat.statusReady', 'Ready'));
     persistStore();
-    promptInput.focus();
+    syncSessionUrl(session.id);
+    if (focus) promptInput.focus();
   }
 
   function renameSession(id) {
@@ -1628,10 +1666,10 @@
   function restoreSessions() {
     const stored = loadStore();
     sessions = stored.sessions.map(normalizeSession);
-    currentSessionId = stored.currentSessionId;
+    currentSessionId = readSessionIdFromUrl() || stored.currentSessionId;
 
     if (!sessions.length) {
-      startNewSession();
+      startNewSession({ focus: false });
       return;
     }
 
@@ -1650,7 +1688,7 @@
     await loadModels();
     restoreSessions();
     resizePromptInput();
-    promptInput.focus();
+    if (canAutofocusPrompt()) promptInput.focus();
   }
 
   newChatBtn?.addEventListener('click', startNewSession);
@@ -1684,6 +1722,27 @@
   sessionModal.addEventListener('click', (event) => {
     if (event.target === sessionModal) closeSessionModal(false);
   });
+  sessionModal.addEventListener('keydown', (event) => {
+    if (!sessionModal.classList.contains('open')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeSessionModal(false);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(sessionModal.querySelectorAll('button,input,select,textarea,a[href],[tabindex]:not([tabindex="-1"])'))
+      .filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
   sessionModalInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -1696,6 +1755,10 @@
       event.preventDefault();
       sendMessage();
     }
+  });
+  window.addEventListener('popstate', () => {
+    const id = readSessionIdFromUrl();
+    if (id && id !== currentSessionId) switchSession(id);
   });
 
   boot().catch((error) => {

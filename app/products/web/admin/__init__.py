@@ -249,12 +249,12 @@ async def runtime_status():
 
 @router.get("/stats", tags=[_TAG_ADMIN_SYSTEM])
 async def account_stats(repo: "AccountRepository" = Depends(get_repo)):
-    """Aggregate dashboard stats — in-memory counts + one SUM query.
+    """Aggregate dashboard stats — in-memory counts + lightweight counters.
 
     Structural counts (total / per-pool / per-status / quota sums) come from
-    the columnar runtime table (O(n), no DB hit). Cumulative call counters
-    come from a single aggregate query, and the global success counter from
-    its dedicated meta row.
+    the columnar runtime table (O(n), no DB hit). The dashboard call total is
+    the dedicated global success counter so it survives account deletion;
+    failure count remains a live-account aggregate.
     """
     from app.dataplane.account import _directory
 
@@ -280,8 +280,8 @@ async def account_stats(repo: "AccountRepository" = Depends(get_repo)):
             code="directory_not_initialised",
             status=503,
         )
-    usage = await repo.aggregate_usage()
     success = await repo.get_global_success_count()
+    usage = await repo.aggregate_usage()
     return Response(
         content=orjson.dumps(
             {
@@ -291,7 +291,7 @@ async def account_stats(repo: "AccountRepository" = Depends(get_repo)):
                 "disabled": snap["disabled"],
                 "by_pool": snap["by_pool"],
                 "quota": snap["quota"],
-                "calls": usage["use_count"],
+                "calls": success,
                 "fail": usage["fail_count"],
                 "success": success,
                 "revision": snap["revision"],

@@ -136,6 +136,11 @@
       background:#fff;
       outline:none;
     }
+    .cfg-help:focus-visible {
+      outline:2px solid var(--focus-ring);
+      outline-offset:2px;
+      box-shadow:0 0 0 3px var(--focus-ring-soft);
+    }
     .cfg-help-tip {
       position:fixed;
       box-sizing:border-box;
@@ -210,6 +215,7 @@
       font-family: inherit; text-align:right;
     }
     .cfg-text:focus { border-color:#d7d7d7; background:#fff; outline:none; box-shadow:none }
+    .cfg-text:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; box-shadow:0 0 0 3px var(--focus-ring-soft) }
     .cfg-text.wide  { max-width:none }
     .cfg-textarea {
       width:100%;
@@ -225,6 +231,7 @@
       font-family: 'Geist Mono', 'Courier New', monospace; line-height:1.5; text-align:right;
     }
     .cfg-textarea:focus { border-color:#d7d7d7; background:#fff; outline:none }
+    .cfg-textarea:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; box-shadow:0 0 0 3px var(--focus-ring-soft) }
     .cfg-number {
       width:100%;
       max-width:none;
@@ -237,6 +244,7 @@
       text-align:right;
     }
     .cfg-number:focus { border-color:#d7d7d7; background:#fff; outline:none }
+    .cfg-number:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; box-shadow:0 0 0 3px var(--focus-ring-soft) }
     .cfg-select {
       width:100%;
       height:32px;
@@ -250,6 +258,7 @@
       cursor:pointer; text-align:right;
     }
     .cfg-select:focus { border-color:#d7d7d7; background:#fff; outline:none }
+    .cfg-select:focus-visible { outline:2px solid var(--focus-ring); outline-offset:2px; box-shadow:0 0 0 3px var(--focus-ring-soft) }
 
     /* Toggle switch */
     .toggle {
@@ -1018,6 +1027,7 @@ function renderInput(field, section, value) {
     chk.type = 'checkbox';
     chk.checked = Boolean(value);
     chk.id = `field-${section}-${field.key}`;
+    chk.name = fp;
     chk.addEventListener('change', () => onChange(chk.checked));
     const track = _el('span', { class: 'toggle-track' });
     const label = _el('label', { class: 'toggle', for: chk.id }, chk, track);
@@ -1025,7 +1035,7 @@ function renderInput(field, section, value) {
   }
 
   if (field.type === 'select') {
-    const sel = _el('select', { class: 'cfg-select', id: `field-${section}-${field.key}` });
+    const sel = _el('select', { class: 'cfg-select', id: `field-${section}-${field.key}`, name: fp });
     const deps = new Set();
     (field.options || []).forEach(opt => {
       const o = document.createElement('option');
@@ -1052,7 +1062,7 @@ function renderInput(field, section, value) {
 
   if (field.type === 'textarea') {
     const ta = _el('textarea', { class: 'cfg-textarea', id: `field-${section}-${field.key}`,
-      rows: '3', placeholder: '' });
+      name: fp, rows: '3', placeholder: '', autocomplete: 'off' });
     ta.value = value ?? '';
     ta.addEventListener('input', () => onChange(ta.value));
     return ta;
@@ -1060,7 +1070,7 @@ function renderInput(field, section, value) {
 
   if (field.type === 'number') {
     const inp = _el('input', { class: 'cfg-number', type: 'number',
-      id: `field-${section}-${field.key}`, value: value ?? '' });
+      id: `field-${section}-${field.key}`, name: fp, value: value ?? '', autocomplete: 'off' });
     inp.addEventListener('input', () => {
       const n = inp.value === '' ? '' : Number(inp.value);
       onChange(n);
@@ -1073,13 +1083,15 @@ function renderInput(field, section, value) {
     class: `cfg-text${field.wide ? ' wide' : ''}`,
     type: field.type === 'password' ? 'password' : 'text',
     id: `field-${section}-${field.key}`,
+    name: fp,
     value: value ?? '',
     autocomplete: 'off',
+    spellcheck: 'false',
   });
   inp.addEventListener('input', () => onChange(inp.value));
 
   if (field.rand) {
-    const btn = _el('button', { class: 'cfg-rand-btn', type: 'button', title: tr('config.randomize', null, '随机生成'), onclick: () => {
+    const btn = _el('button', { class: 'cfg-rand-btn', type: 'button', title: tr('config.randomize', null, '随机生成'), 'aria-label': tr('config.randomize', null, '随机生成'), onclick: () => {
       const uuid = crypto.randomUUID().replace(/-/g, '').slice(0, 24);
       inp.value = uuid;
       inp.type = 'text';
@@ -1097,6 +1109,9 @@ function renderRow(field, section, tabId) {
   const fp      = _fullPath(section, field.key);
   const value   = _getValue(section, field.key);
   const isDirty = fp in _dirty;
+  const safeId  = `${section}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const labelId = `cfg-label-${safeId}`;
+  const descId  = `cfg-desc-${safeId}`;
 
   const dot   = _el('span', { class: 'cfg-modified-dot' });
   const input = renderInput(field, section, isDirty ? _dirty[fp] : value);
@@ -1136,9 +1151,17 @@ function renderRow(field, section, tabId) {
 
   labelChildren.push(dot);
 
+  const control = input.matches?.('input,select,textarea')
+    ? input
+    : input.querySelector?.('input,select,textarea');
+  if (control) {
+    control.setAttribute('aria-labelledby', labelId);
+    if (field.desc) control.setAttribute('aria-describedby', descId);
+  }
+
   const labelCol = _el('div', { class: 'cfg-label-col' },
-    _el('div', { class: 'cfg-label' }, labelChildren),
-    field.desc ? _el('div', { class: 'cfg-desc' }, field.desc) : null,
+    _el('div', { class: 'cfg-label', id: labelId }, labelChildren),
+    field.desc ? _el('div', { class: 'cfg-desc', id: descId }, field.desc) : null,
   );
   const inputCol = _el('div', { class: `cfg-input-col${field.type === 'bool' ? ' is-bool' : ''}` }, input);
 

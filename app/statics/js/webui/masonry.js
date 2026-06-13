@@ -30,6 +30,20 @@
     return `${width} / ${height}`;
   }
 
+  function aspectRatioDimensions(value) {
+    const ratio = String(value || '').trim();
+    if (!ratio.includes(':')) return [600, 600];
+    const [w, h] = ratio.split(':');
+    const width = Number(w) || 1;
+    const height = Number(h) || 1;
+    if (width >= height) return [600, Math.max(1, Math.round(600 * height / width))];
+    return [Math.max(1, Math.round(600 * width / height)), 600];
+  }
+
+  function canAutofocusPrompt() {
+    return window.matchMedia?.('(pointer: fine)').matches && !window.matchMedia?.('(max-width: 768px)').matches;
+  }
+
   function computeGridColumns(width) {
     const viewport = window.innerWidth || width || 0;
     const maxCols = viewport <= 768 ? 3 : 8;
@@ -155,7 +169,7 @@
     });
   }
 
-  function createSlot(index) {
+  function createSlot(index, aspectRatio) {
     const tile = document.createElement('article');
     tile.className = 'webui-masonry-tile is-pending';
 
@@ -176,6 +190,9 @@
     const img = document.createElement('img');
     img.alt = `image ${index}`;
     img.loading = 'lazy';
+    const [width, height] = aspectRatioDimensions(aspectRatio);
+    img.width = width;
+    img.height = height;
     link.appendChild(img);
 
     const label = document.createElement('div');
@@ -267,7 +284,7 @@
     grid.className = 'webui-masonry-grid';
     grid.style.setProperty('--tile-aspect', aspectRatioCss(aspectRatio));
 
-    const slots = Array.from({ length: IMAGE_COUNT }, (_, index) => createSlot(index + 1));
+    const slots = Array.from({ length: IMAGE_COUNT }, (_, index) => createSlot(index + 1, aspectRatio));
     slots.forEach((slot) => {
       renderSlot(slot);
       grid.appendChild(slot.tile);
@@ -680,7 +697,7 @@
     setEmptyState();
     setStatus(text('webui.masonry.statusReady', '就绪'), 'idle');
     resizePromptInput();
-    promptInput?.focus();
+    if (canAutofocusPrompt()) promptInput?.focus();
   }
 
   sendBtn?.addEventListener('click', () => {

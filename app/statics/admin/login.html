@@ -21,7 +21,8 @@
       <div class="login-title" data-i18n="login.adminTitle">管理后台</div>
       <div class="login-subtitle" data-i18n="login.adminSubtitle">请输入后台密码以继续</div>
       <div class="login-form">
-        <input type="password" id="key" placeholder="后台密码" data-i18n-placeholder="login.adminPlaceholder" class="input" style="height:32px;font-size:12px">
+        <label for="key" class="sr-only" data-i18n="login.adminPlaceholder">后台密码</label>
+        <input type="password" id="key" name="admin_key" autocomplete="current-password" placeholder="后台密码" data-i18n-placeholder="login.adminPlaceholder" class="input" style="height:32px;font-size:12px">
         <button onclick="login()" class="btn btn-primary w-full" style="font-size:12px" data-i18n="login.continue">继续</button>
       </div>
     </div>

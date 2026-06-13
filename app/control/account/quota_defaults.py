@@ -11,8 +11,9 @@ Console.x.ai models use a local-only quota window shared by every pool:
 30 calls / 15 minutes. The grok.com rate-limits API does not know this
 mode, so callers that sync upstream usage must use ``usage_sync_mode_ids``.
 
-Pool inference uses ``auto.total`` as the primary signal for super/heavy
-accounts; basic accounts no longer expose auto/expert windows locally.
+Pool inference uses ``auto.total`` as the primary signal for paid accounts.
+Some Super accounts expose a heavy quota window, but that does not mean they
+can call heavy models.
 """
 
 from typing import TYPE_CHECKING
@@ -188,9 +189,11 @@ def infer_pool(windows: dict[int, QuotaWindow]) -> str:
     Uses ``auto.total`` (mode_id=0) as the discriminating signal:
       - 25 -> lite
       - 50 -> super
-      - 150 -> heavy
-      - otherwise -> basic
-    Falls back to ``"basic"`` when the value is absent or unrecognised.
+      - 150+ -> heavy
+      - absent/unrecognised -> basic
+
+    Do not infer heavy from the heavy quota window alone: Super accounts may
+    expose ``H:20`` while still receiving 403 from the heavy chat model.
     """
     auto_win = windows.get(0)
     if auto_win is None:
@@ -198,12 +201,11 @@ def infer_pool(windows: dict[int, QuotaWindow]) -> str:
     total = auto_win.total
     if total == 25:
         return "lite"
-    elif total == 50:
+    if total == 50:
         return "super"
-    elif total >= 150:
+    if total >= 150:
         return "heavy"
-    else:
-        return "basic"
+    return "basic"
 
 
 __all__ = [

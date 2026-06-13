@@ -32,13 +32,19 @@ def _normalize_version(value: str) -> str:
 
 def _parse_version(value: str) -> tuple[int, int, int, int, int] | None:
     normalized = _normalize_version(value)
-    match = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(?:\.|-)?rc(\d+))?$", normalized, re.IGNORECASE)
+    match = re.match(
+        r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(?:\.|-)?(a|alpha|b|beta|rc)(\d*)?)?$",
+        normalized,
+        re.IGNORECASE,
+    )
     if not match:
         return None
-    major, minor, patch, rc = match.groups()
-    is_final = 1 if rc is None else 0
-    rc_number = int(rc or 0)
-    return int(major or 0), int(minor or 0), int(patch or 0), is_final, rc_number
+    major, minor, patch, phase, phase_number = match.groups()
+    phase_rank = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "rc": 2}.get(
+        (phase or "").lower(),
+        3,
+    )
+    return int(major or 0), int(minor or 0), int(patch or 0), phase_rank, int(phase_number or 0)
 
 
 def _is_newer(latest: str, current: str) -> bool:

@@ -7,18 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 ENV PATH="$UV_PROJECT_ENVIRONMENT/bin:$PATH"
 
-# Rust/Cargo are required to compile curl-cffi wheels on musl/Alpine.
-# If upstream ever ships musl wheels, remove cargo + rust to speed up builds.
-RUN apk add --no-cache \
-    ca-certificates \
-    build-base \
-    linux-headers \
-    libffi-dev \
-    openssl-dev \
-    curl-dev \
-    cargo \
-    rust
-
 WORKDIR /app
 
 # Pin uv to a minor version for reproducible builds.
@@ -27,7 +15,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 
-RUN UV_HTTP_TIMEOUT=120 uv sync --frozen --no-dev --no-install-project \
+RUN UV_HTTP_TIMEOUT=120 uv sync --frozen --no-build --no-dev --no-install-project \
     && find /opt/venv -type d \
          \( -name "__pycache__" -o -name "tests" -o -name "test" -o -name "testing" \) \
          -prune -exec rm -rf {} + \

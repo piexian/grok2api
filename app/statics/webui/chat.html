@@ -36,14 +36,14 @@
     <section class="webui-workspace">
       <section class="webui-chat-pane">
         <section class="webui-thread-shell">
-          <main id="thread" class="webui-thread">
+          <div id="thread" class="webui-thread" role="log" aria-live="polite" aria-label="Chat messages">
             <div id="emptyState" class="webui-empty">
               <div class="webui-empty-card">
                 <div class="webui-empty-title" data-i18n="webui.chat.emptyTitle">Web Chat</div>
                 <div class="webui-empty-text" data-i18n="webui.chat.empty">输入一条消息开始新的会话。</div>
               </div>
             </div>
-          </main>
+          </div>
         </section>
 
         <section class="webui-composer">
@@ -53,10 +53,12 @@
               <svg viewBox="0 0 24 24" fill="none"><path d="M12 16V5M8 9l4-4 4 4M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <input id="fileInput" type="file" hidden multiple>
-            <textarea id="promptInput" class="input webui-textarea" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行" data-i18n-placeholder="webui.chat.promptPlaceholder"></textarea>
+            <label for="promptInput" class="sr-only" data-i18n="webui.chat.promptLabel">消息</label>
+            <textarea id="promptInput" name="prompt" class="input webui-textarea" autocomplete="off" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行" data-i18n-placeholder="webui.chat.promptPlaceholder"></textarea>
             <div class="webui-sendbar">
               <label class="webui-sendbar-model">
-                <select id="modelSelect" class="input" data-i18n-aria-label="webui.chat.modelLabel"></select>
+                <span class="sr-only" data-i18n="webui.chat.modelLabel">模型</span>
+                <select id="modelSelect" name="model" class="input" data-i18n-aria-label="webui.chat.modelLabel"></select>
               </label>
               <button id="sendBtn" class="webui-primary-btn" type="button" data-i18n="webui.chat.send">发送</button>
             </div>
@@ -67,11 +69,12 @@
   </main>
 
   <div id="sessionModal" class="modal-overlay" aria-hidden="true">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sessionModalTitle" aria-describedby="sessionModalDesc">
       <div id="sessionModalTitle" class="modal-title">会话操作</div>
       <div id="sessionModalDesc" class="text-xs text-muted"></div>
       <div id="sessionModalInputWrap" class="mt-2" hidden>
-        <input id="sessionModalInput" class="input" type="text">
+        <label for="sessionModalInput" class="sr-only" data-i18n="webui.chat.sessionName">会话名称</label>
+        <input id="sessionModalInput" name="session_name" class="input" type="text" autocomplete="off">
       </div>
       <div class="modal-footer">
         <button id="sessionModalCancel" type="button" class="btn btn-ghost" data-i18n="webui.chat.cancel">取消</button>

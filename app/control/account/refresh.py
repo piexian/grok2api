@@ -1,8 +1,9 @@
 """Account refresh service — mode-aware usage synchronisation."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, TypeVar
 
 from app.platform.errors import UpstreamError
 from app.platform.config.snapshot import get_config
@@ -35,6 +36,7 @@ class RefreshResult:
     disabled: int = 0
     rate_limited: int = 0
     failed: int = 0
+    cursor: str | None = None
 
     def merge(self, other: "RefreshResult") -> None:
         self.checked += other.checked
@@ -44,6 +46,8 @@ class RefreshResult:
         self.disabled += other.disabled
         self.rate_limited += other.rate_limited
         self.failed += other.failed
+        if other.cursor is not None:
+            self.cursor = other.cursor
 
 
 _MODE_KEYS = {
@@ -54,6 +58,58 @@ _MODE_KEYS = {
     4: "quota_grok_4_3",
     5: "quota_console",
 }
+_UPSTREAM_QUOTA_MODE_IDS = (0, 1, 2, 3, 4)
+_POOL_DETECTION_MODE_IDS = (0,)
+_REFRESH_POOL_PRIORITY = {"heavy": 0, "super": 1, "lite": 2, "basic": 3}
+_REFRESH_RECORD_BATCH_SIZE = 1000
+_ACCOUNT_LOOKUP_BATCH_SIZE = 500
+_RefreshT = TypeVar("_RefreshT")
+
+
+def _quota_probe_mode_ids(pool: str) -> tuple[int, ...]:
+    requested = set(usage_sync_mode_ids(pool))
+    requested.update(_POOL_DETECTION_MODE_IDS)
+    return tuple(mode_id for mode_id in _UPSTREAM_QUOTA_MODE_IDS if mode_id in requested)
+
+
+def _pool_rank(pool: str) -> int:
+    return {"basic": 0, "lite": 1, "super": 2, "heavy": 3}.get(pool, 0)
+
+
+def _refresh_pool_priority(pool: str) -> int:
+    return _REFRESH_POOL_PRIORITY.get(pool, 4)
+
+
+def _prioritize_refresh_records(records: list[AccountRecord]) -> list[AccountRecord]:
+    return sorted(
+        records,
+        key=lambda record: (_refresh_pool_priority(record.pool), record.token),
+    )
+
+
+async def _get_accounts_by_tokens(
+    repo: "AccountRepository",
+    tokens: list[str],
+) -> list[AccountRecord]:
+    records: list[AccountRecord] = []
+    for start in range(0, len(tokens), _ACCOUNT_LOOKUP_BATCH_SIZE):
+        chunk = tokens[start : start + _ACCOUNT_LOOKUP_BATCH_SIZE]
+        records.extend(await repo.get_accounts(chunk))
+    return records
+
+
+async def _run_refresh_record_batches(
+    records: list[AccountRecord],
+    handler: Callable[[AccountRecord], Awaitable[_RefreshT]],
+    *,
+    concurrency: int,
+) -> list[_RefreshT]:
+    batch_size = max(_REFRESH_RECORD_BATCH_SIZE, concurrency)
+    results: list[_RefreshT] = []
+    for start in range(0, len(records), batch_size):
+        chunk = records[start : start + batch_size]
+        results.extend(await run_batch(chunk, handler, concurrency=concurrency))
+    return results
 
 
 class AccountRefreshService:
@@ -81,14 +137,14 @@ class AccountRefreshService:
         """Fetch quota windows for every mode supported by *pool*.
 
         Examples:
-          - basic -> fast
-          - super -> auto / fast / expert / grok_4_3
+          - basic -> auto / fast / heavy probe
+          - super -> auto / fast / expert / heavy probe / grok_4_3
           - heavy -> auto / fast / expert / heavy / grok_4_3
         """
         try:
             from app.dataplane.reverse.protocol.xai_usage import fetch_all_quotas
 
-            return await fetch_all_quotas(token, usage_sync_mode_ids(pool))
+            return await fetch_all_quotas(token, _quota_probe_mode_ids(pool))
         except UpstreamError:
             raise
         except Exception as exc:
@@ -196,25 +252,25 @@ class AccountRefreshService:
 
     async def refresh_on_import(self, tokens: list[str]) -> RefreshResult:
         """Called after bulk import — sync real quotas and subscription info for all accounts."""
-        records = await self._repo.get_accounts(tokens)
+        records = await _get_accounts_by_tokens(self._repo, tokens)
         active = [r for r in records if is_manageable(r)]
         if not active:
             return RefreshResult(checked=len(records))
 
         # Phase 1: Fetch subscription info (account_id + tier) for accounts missing it.
         # Side-effecting: persists account_id/pool; records are re-read below.
-        await run_batch(
+        await _run_refresh_record_batches(
             [r for r in active if not r.account_id],
             lambda r: self._refresh_subscription(r),
             concurrency=get_config("account.refresh.usage_concurrency", 50),
         )
         # Refresh the records after subscription updates.
-        records = await self._repo.get_accounts(tokens)
-        active = [r for r in records if is_manageable(r)]
+        records = await _get_accounts_by_tokens(self._repo, tokens)
+        active = _prioritize_refresh_records([r for r in records if is_manageable(r)])
 
         # Phase 2: Fetch quota windows.
         concurrency = get_config("account.refresh.usage_concurrency", 50)
-        results = await run_batch(
+        results = await _run_refresh_record_batches(
             active,
             lambda r: self._refresh_one(r, apply_fallback=True),
             concurrency=concurrency,
@@ -245,20 +301,34 @@ class AccountRefreshService:
             record, mode_id, window, is_use=True, use_at_ms=now_ms()
         )
 
-    async def refresh_scheduled(self, pool: str | None = None) -> RefreshResult:
+    async def refresh_scheduled(
+        self,
+        pool: str | None = None,
+        *,
+        limit: int | None = None,
+        after_token: str | None = None,
+    ) -> RefreshResult:
         """Periodic refresh — fetch real quotas for all (or one pool's) accounts.
 
         Args:
             pool: When set, only refreshes accounts belonging to that pool.
                   When ``None``, refreshes all pools.
+            limit: Optional maximum number of accounts to process.
+            after_token: Optional token cursor after filtering/sorting, used by
+                         the scheduler to rotate through very large pools.
         """
         snapshot = await self._repo.runtime_snapshot()
         records = [r for r in snapshot.items if is_manageable(r)]
         if pool is not None:
             records = [r for r in records if r.pool == pool]
+        records = _prioritize_refresh_records(records)
+        if after_token:
+            records = [r for r in records if r.token > after_token]
+        if limit is not None:
+            records = records[: max(0, limit)]
 
         concurrency = get_config("account.refresh.usage_concurrency", 50)
-        results = await run_batch(
+        results = await _run_refresh_record_batches(
             records,
             lambda r: self._refresh_one(r, apply_fallback=True),
             concurrency=concurrency,
@@ -266,6 +336,7 @@ class AccountRefreshService:
         agg = RefreshResult()
         for r in results:
             agg.merge(r)
+        agg.cursor = records[-1].token if records else after_token
         return agg
 
     async def refresh_on_demand(self) -> RefreshResult:
@@ -290,9 +361,17 @@ class AccountRefreshService:
 
     async def refresh_tokens(self, tokens: list[str]) -> RefreshResult:
         """Explicit refresh for a list of tokens (admin / manual trigger)."""
-        records = [r for r in await self._repo.get_accounts(tokens) if is_manageable(r)]
+        records = [
+            r for r in await _get_accounts_by_tokens(self._repo, tokens)
+            if is_manageable(r)
+        ]
+        records = _prioritize_refresh_records(records)
         concurrency = get_config("account.refresh.usage_concurrency", 50)
-        results = await run_batch(records, self._refresh_one, concurrency=concurrency)
+        results = await _run_refresh_record_batches(
+            records,
+            self._refresh_one,
+            concurrency=concurrency,
+        )
         agg = RefreshResult()
         for r in results:
             agg.merge(r)
@@ -333,7 +412,11 @@ class AccountRefreshService:
             return await self._apply_fallback(record)
 
         # We got at least a response — apply real data per mode.
-        qs = normalize_quota_set(record.pool, record.quota_set())
+        inferred = infer_pool(windows)  # type: ignore[arg-type]
+        target_pool = (
+            inferred if 0 in windows else record.pool
+        )
+        qs = normalize_quota_set(target_pool, record.quota_set())
         now = now_ms()
         patches: dict[str, dict] = {}
         refreshed = False
@@ -341,7 +424,7 @@ class AccountRefreshService:
         for mode in ALL_MODES_FULL:
             mode_id = int(mode)
             if mode_id in windows:
-                window = normalize_quota_window(record.pool, mode_id, windows[mode_id])
+                window = normalize_quota_window(target_pool, mode_id, windows[mode_id])
                 if window is None:
                     continue
                 patches[_MODE_KEYS[mode_id]] = window.to_dict()
@@ -360,7 +443,7 @@ class AccountRefreshService:
                         source=QuotaSource.ESTIMATED,
                     ).to_dict()
                 elif existing.is_window_expired(now):
-                    default = default_quota_window(record.pool, mode_id)
+                    default = default_quota_window(target_pool, mode_id)
                     if default is None:
                         continue
                     patches[_MODE_KEYS[mode_id]] = QuotaWindow(
@@ -375,9 +458,7 @@ class AccountRefreshService:
         if not patches:
             return RefreshResult(checked=1, failed=0 if refreshed else 1)
 
-        # Infer pool type from live quota data and patch if it changed.
-        inferred = infer_pool(windows)  # type: ignore[arg-type]
-        pool_patch = inferred if inferred != record.pool else None
+        pool_patch = target_pool if target_pool != record.pool else None
         if pool_patch:
             logger.info(
                 "account pool updated from live quota: token={}... previous_pool={} current_pool={}",

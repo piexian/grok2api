@@ -329,6 +329,25 @@ class AccountDirectory:
             "revision": table.revision,
         }
 
+    def available_pools_snapshot(self) -> frozenset[str] | None:
+        """Return manageable account pools from the in-memory table.
+
+        Returns ``None`` before bootstrap so callers can fall back to the
+        repository path during startup.
+        """
+        table = self._table
+        if table is None:
+            return None
+        manageable = {int(StatusId.ACTIVE), int(StatusId.COOLING)}
+        pools: set[str] = set()
+        for idx in table.iter_live_indices():
+            if int(table.status_by_idx[idx]) not in manageable:
+                continue
+            pool = POOL_ID_TO_STR.get(int(table.pool_by_idx[idx]))
+            if pool:
+                pools.add(pool)
+        return frozenset(pools)
+
     async def _increment_global_success_count(self) -> None:
         try:
             await self._repo.increment_global_success_count()

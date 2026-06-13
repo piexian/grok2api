@@ -356,24 +356,24 @@
   <div class="sec-panel active" id="panel-local">
     <div class="table-toolbar">
       <div class="table-toolbar-left" style="display:flex;align-items:center;gap:6px">
-        <button class="pagi-btn" onclick="prevPage()" id="btn-prev" disabled>
+        <button class="pagi-btn" onclick="prevPage()" id="btn-prev" disabled aria-label="上一页" title="上一页">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
         </button>
         <div class="pagi-meta">
           <span class="pagi-page" id="pagi-page">第 0 / 0 页</span>
         </div>
-        <button class="pagi-btn" onclick="nextPage()" id="btn-next" disabled>
+        <button class="pagi-btn" onclick="nextPage()" id="btn-next" disabled aria-label="下一页" title="下一页">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
       </div>
       <div class="table-toolbar-actions">
-        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearLocal()" id="btn-clear">
+        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearLocal()" id="btn-clear" aria-label="清空本地缓存" title="清空本地缓存">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg>
         </button>
-        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="deleteSelectedLocal()" id="btn-local-delete-selected" style="display:none">
+        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="deleteSelectedLocal()" id="btn-local-delete-selected" style="display:none" aria-label="删除选中" title="删除选中">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg>
         </button>
-        <select class="input toolbar-page-size" id="page-size-sel" onchange="changePageSize(this.value)">
+        <select class="input toolbar-page-size" id="page-size-sel" onchange="changePageSize(this.value)" aria-label="每页数量">
           <option value="50">50 / 页</option>
           <option value="100">100 / 页</option>
           <option value="200">200 / 页</option>
@@ -388,7 +388,7 @@
       <table>
         <thead>
           <tr>
-            <th style="width:36px"><input type="checkbox" class="cb" id="cb-local-all" onchange="toggleAllLocal(this.checked)"></th>
+            <th style="width:36px"><input type="checkbox" class="cb" id="cb-local-all" onchange="toggleAllLocal(this.checked)" aria-label="选择全部本地缓存"></th>
             <th data-i18n="cache.colFileName">文件名</th>
             <th style="width:100px" data-i18n="cache.colSize">大小</th>
             <th style="width:160px" data-i18n="cache.colModified">修改时间</th>
@@ -407,16 +407,16 @@
         <span id="asset-summary" class="asset-summary"></span>
       </div>
       <div class="table-toolbar-actions">
-        <button class="toolbar-icon-btn" onclick="loadAssets()" id="btn-load-assets">
+        <button class="toolbar-icon-btn" onclick="loadAssets()" id="btn-load-assets" aria-label="加载在线资产" title="加载在线资产">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
         </button>
-        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearAllAssets()" id="btn-clear-all-assets" style="display:none">
+        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearAllAssets()" id="btn-clear-all-assets" style="display:none" aria-label="清空在线资产" title="清空在线资产">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg>
         </button>
-        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearSelectedAssets()" id="btn-clear-selected-assets" style="display:none">
+        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="clearSelectedAssets()" id="btn-clear-selected-assets" style="display:none" aria-label="清理选中" title="清理选中">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg>
         </button>
-        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="cancelAssetClear()" id="btn-asset-cancel" style="display:none">
+        <button class="toolbar-icon-btn toolbar-icon-btn-danger" onclick="cancelAssetClear()" id="btn-asset-cancel" style="display:none" aria-label="取消" title="取消">
           <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M6 6 18 18"/><path d="M18 6 6 18"/></svg>
         </button>
       </div>
@@ -427,7 +427,7 @@
       <table>
         <thead>
           <tr>
-            <th style="width:36px"><input type="checkbox" class="cb" id="cb-asset-all" onchange="toggleAllAssets(this.checked)"></th>
+            <th style="width:36px"><input type="checkbox" class="cb" id="cb-asset-all" onchange="toggleAllAssets(this.checked)" aria-label="选择全部在线资产"></th>
             <th style="width:32px"></th>
             <th data-i18n="cache.colToken">Token</th>
             <th style="width:72px" data-i18n="cache.colFileCount">文件数</th>
@@ -726,7 +726,7 @@ function _renderTable(view = getLocalView()) {
   }
   tbody.innerHTML = items.map((f) => `
     <tr>
-      <td><input type="checkbox" class="cb local-row-cb" data-name="${_esc(f.name)}" ${_localSel.has(f.name) ? 'checked' : ''} onchange="toggleLocalRow(this)"></td>
+      <td><input type="checkbox" class="cb local-row-cb" data-name="${_esc(f.name)}" ${_localSel.has(f.name) ? 'checked' : ''} onchange="toggleLocalRow(this)" aria-label="${_esc(tr('cache.selectFile', { name: f.name }, '选择 ' + f.name))}"></td>
       <td>
         <div class="row-name">
           <span class="row-icon" aria-hidden="true">
@@ -808,6 +808,7 @@ async function clearLocal() {
 }
 
 async function deleteFile(name) {
+  if (!confirm(tr('cache.deleteFileConfirm', { name }, `确定要删除 ${name} 吗？`))) return;
   try {
     await _api('POST', '/cache/item/delete', { type: _type, name });
     _localSel.delete(name);
@@ -890,9 +891,9 @@ function _renderAssets(view = getAssetView()) {
   for (const { row, masked, assets, hasItems, isOpen, isSelected } of view.rows) {
     rows.push(`
       <tr>
-        <td><input type="checkbox" class="cb asset-row-cb" data-token="${_esc(row.token)}" ${isSelected ? 'checked' : ''} onchange="toggleAssetRow(this)"></td>
+        <td><input type="checkbox" class="cb asset-row-cb" data-token="${_esc(row.token)}" ${isSelected ? 'checked' : ''} onchange="toggleAssetRow(this)" aria-label="${_esc(tr('cache.selectToken', { token: masked }, '选择 ' + masked))}"></td>
         <td style="padding:10px 8px 10px 14px">
-          ${hasItems ? `<button class="expand-btn${isOpen ? ' open' : ''}" onclick="toggleExpand('${_esc(masked)}')" title="${_esc(isOpen ? collapseLabel : expandLabel)}">
+          ${hasItems ? `<button type="button" class="expand-btn${isOpen ? ' open' : ''}" onclick="toggleExpand('${_esc(masked)}')" title="${_esc(isOpen ? collapseLabel : expandLabel)}" aria-label="${_esc(isOpen ? collapseLabel : expandLabel)}" aria-expanded="${isOpen ? 'true' : 'false'}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
           </button>` : '<span style="width:22px;display:inline-block"></span>'}
         </td>
@@ -959,6 +960,7 @@ async function clearTokenAssets(token, masked) {
 }
 
 async function deleteAssetItem(token, masked, assetId) {
+  if (!confirm(tr('cache.deleteAssetConfirm', { token: masked }, `确定要删除 ${masked} 的这个在线资产吗？`))) return;
   try {
     await _api('POST', '/assets/delete-item', { token, asset_id: assetId });
     showToast(tr('cache.deleted', null, '已删除'));

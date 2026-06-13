@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from loguru import logger
 
@@ -40,6 +40,10 @@ _DEFAULTS_PATH = _BASE_DIR / "config.defaults.toml"
 _USER_CFG_PATH = data_path("config.toml")
 _LOCAL_DB_PATH = data_path("accounts.db")
 _BATCH         = 500  # accounts per upsert/patch batch
+_STARTUP_SECTION = "startup"
+_MIGRATIONS_SECTION = "migrations"
+_MIGRATION_GROK_4_3_QUOTA = "account_grok_4_3_quota_v1"
+_MIGRATION_BASIC_FAST_ONLY_QUOTA = "account_basic_fast_only_quota_v2"
 
 
 # ---------------------------------------------------------------------------
@@ -50,12 +54,86 @@ async def run_startup_migrations(
     config_backend: "ConfigBackend",
     account_repo: "AccountRepository",
 ) -> None:
-    """Run all first-boot migrations.  Safe to call on every startup."""
+    """Run startup-critical migrations before the ASGI app is marked ready."""
     await _migrate_config(config_backend)
     await _migrate_basic_refresh_interval(config_backend)
     await _migrate_accounts(account_repo)
-    await _backfill_grok_4_3_quota(account_repo)
-    await _normalize_basic_fast_only_quota(account_repo)
+
+
+async def run_account_backfill_migrations(
+    config_backend: "ConfigBackend",
+    account_repo: "AccountRepository",
+) -> None:
+    """Run large one-time account data fixes.
+
+    These can scan many accounts, so the main application starts first and the
+    scheduler leader runs them in the background.
+    """
+    await _run_marked_account_migration(
+        config_backend,
+        account_repo,
+        name=_MIGRATION_GROK_4_3_QUOTA,
+        probe_method="needs_grok_4_3_quota_backfill",
+        migration=_backfill_grok_4_3_quota,
+    )
+    await _run_marked_account_migration(
+        config_backend,
+        account_repo,
+        name=_MIGRATION_BASIC_FAST_ONLY_QUOTA,
+        probe_method="needs_basic_fast_only_quota_normalization",
+        migration=_normalize_basic_fast_only_quota,
+    )
+
+
+async def _run_marked_account_migration(
+    config_backend: "ConfigBackend",
+    account_repo: "AccountRepository",
+    *,
+    name: str,
+    probe_method: str,
+    migration: Callable[["AccountRepository"], Awaitable[None]],
+) -> None:
+    if await _migration_completed(config_backend, name):
+        logger.debug("account: startup migration already complete: {}", name)
+        return
+
+    probe = getattr(account_repo, probe_method, None)
+    if callable(probe):
+        try:
+            if not await probe():
+                await _mark_migration_completed(config_backend, name)
+                logger.info(
+                    "account: startup migration marked complete: {} (no candidates)",
+                    name,
+                )
+                return
+        except Exception as exc:
+            logger.debug(
+                "account: startup migration probe failed: name={} error={}",
+                name,
+                exc,
+            )
+
+    await migration(account_repo)
+    await _mark_migration_completed(config_backend, name)
+    logger.info("account: startup migration complete: {}", name)
+
+
+async def _migration_completed(backend: "ConfigBackend", name: str) -> bool:
+    data = await backend.load()
+    startup = data.get(_STARTUP_SECTION, {})
+    migrations = (
+        startup.get(_MIGRATIONS_SECTION, {}) if isinstance(startup, dict) else {}
+    )
+    if not isinstance(migrations, dict):
+        return False
+    return bool(migrations.get(name))
+
+
+async def _mark_migration_completed(backend: "ConfigBackend", name: str) -> None:
+    await backend.apply_patch(
+        {_STARTUP_SECTION: {_MIGRATIONS_SECTION: {name: True}}}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +351,15 @@ async def _normalize_basic_fast_only_quota(repo: "AccountRepository") -> None:
                     quota_auto=normalized.auto.to_dict(),
                     quota_fast=normalized.fast.to_dict(),
                     quota_expert=normalized.expert.to_dict(),
+                    quota_heavy=normalized.heavy.to_dict()
+                    if normalized.heavy is not None
+                    else {},
+                    quota_grok_4_3=normalized.grok_4_3.to_dict()
+                    if normalized.grok_4_3 is not None
+                    else {},
+                    quota_console=normalized.console.to_dict()
+                    if normalized.console is not None
+                    else None,
                 )
             )
         if page >= result.total_pages:

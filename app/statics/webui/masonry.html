@@ -31,23 +31,27 @@
         <div class="webui-masonry-input-shell">
           <textarea
             id="promptInput"
+            name="prompt"
             class="input webui-textarea"
+            autocomplete="off"
             placeholder="描述你想生成的画面，Enter 生成，Shift+Enter 换行"
             data-i18n-placeholder="webui.masonry.promptPlaceholder"
           ></textarea>
+          <label for="promptInput" class="sr-only" data-i18n="webui.masonry.promptLabel">提示词</label>
           <div class="webui-masonry-toolbar">
             <div class="webui-masonry-controls">
-              <div id="modeToggle" class="webui-masonry-toggle" role="tablist" data-kind="mode">
-                <button type="button" class="webui-masonry-toggle-btn is-active" data-value="single" data-i18n="webui.masonry.modeRounds">Rounds</button>
-                <button type="button" class="webui-masonry-toggle-btn" data-value="continuous" data-i18n="webui.masonry.modeCycles">Cycles</button>
+              <div id="modeToggle" class="webui-masonry-toggle" role="group" aria-label="Generation mode" data-kind="mode">
+                <button type="button" class="webui-masonry-toggle-btn is-active" data-value="single" aria-pressed="true" data-i18n="webui.masonry.modeRounds">Rounds</button>
+                <button type="button" class="webui-masonry-toggle-btn" data-value="continuous" aria-pressed="false" data-i18n="webui.masonry.modeCycles">Cycles</button>
               </div>
-              <div id="qualityToggle" class="webui-masonry-toggle" role="tablist" data-kind="quality">
-                <button type="button" class="webui-masonry-toggle-btn is-active" data-value="speed" data-i18n="webui.masonry.qualitySpeed">Speed</button>
-                <button type="button" class="webui-masonry-toggle-btn" data-value="quality" data-i18n="webui.masonry.qualityQuality">Quality</button>
+              <div id="qualityToggle" class="webui-masonry-toggle" role="group" aria-label="Generation quality" data-kind="quality">
+                <button type="button" class="webui-masonry-toggle-btn is-active" data-value="speed" aria-pressed="true" data-i18n="webui.masonry.qualitySpeed">Speed</button>
+                <button type="button" class="webui-masonry-toggle-btn" data-value="quality" aria-pressed="false" data-i18n="webui.masonry.qualityQuality">Quality</button>
               </div>
               <label id="aspectRatioWrap" class="webui-masonry-ratio" data-ratio="2:3">
+                <span class="sr-only" data-i18n="webui.masonry.aspectRatioLabel">Aspect ratio</span>
                 <span class="webui-masonry-ratio-icon" aria-hidden="true"></span>
-                <select id="aspectRatioSelect" class="input">
+                <select id="aspectRatioSelect" name="aspect_ratio" class="input">
                   <option value="2:3" selected>2:3</option>
                   <option value="3:2">3:2</option>
                   <option value="1:1">1:1</option>

@@ -20,6 +20,7 @@ from app.platform.errors import AppError, ErrorKind, UpstreamError, ValidationEr
 from app.platform.runtime.batch import run_batch
 from app.platform.runtime.task import create_task, expire_task, get_task
 from app.control.account.commands import AccountPatch, ListAccountsQuery
+from app.control.account.refresh import _get_accounts_by_tokens, _refresh_pool_priority
 from app.control.account.state_machine import is_manageable
 
 if TYPE_CHECKING:
@@ -55,6 +56,24 @@ async def _list_all_tokens(repo: "AccountRepository") -> list[str]:
             break
         page_num += 1
     return tokens
+
+
+async def _prioritize_refresh_tokens(
+    repo: "AccountRepository",
+    tokens: list[str],
+) -> list[str]:
+    records = await _get_accounts_by_tokens(repo, tokens)
+    pool_by_token = {record.token: record.pool for record in records}
+    return [
+        token
+        for _, token in sorted(
+            enumerate(tokens),
+            key=lambda item: (
+                _refresh_pool_priority(pool_by_token.get(item[1], "")),
+                item[0],
+            ),
+        )
+    ]
 
 
 def _json(data: Any, status_code: int = 200) -> Response:
@@ -239,10 +258,12 @@ async def batch_refresh(
     async_mode: bool = Query(False, alias="async"),
     concurrency: int | None = Query(None, ge=1),
     refresh_svc: "AccountRefreshService" = Depends(get_refresh_svc),
+    repo: "AccountRepository" = Depends(get_repo),
 ):
     tokens = [t.strip() for t in req.tokens if t.strip()]
     if not tokens:
         raise ValidationError("No tokens provided", param="tokens")
+    tokens = await _prioritize_refresh_tokens(repo, tokens)
 
     async def _refresh_one(token: str) -> dict:
         result = await refresh_svc.refresh_tokens([token])

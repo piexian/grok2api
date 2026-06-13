@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 
 
 from app.platform.logging.logger import logger
-from app.platform.config.snapshot import get_config
 from app.control.proxy.models import ProxyLease
 from app.dataplane.proxy.adapters.profile import ProxyProfile, resolve_proxy_profile
 
@@ -65,19 +64,14 @@ def _sanitize(value: Optional[str], *, field: str, strip_spaces: bool = False) -
 
 
 def _statsig_id() -> str:
-    cfg = get_config()
-    if cfg.get_bool("features.dynamic_statsig", False):
-        if random.choice((True, False)):
-            rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
-            msg = f"e:TypeError: Cannot read properties of null (reading 'children['{rand}']')"
-        else:
-            rand = "".join(random.choices(string.ascii_lowercase, k=10))
-            msg = f"e:TypeError: Cannot read properties of undefined (reading '{rand}')"
-        return base64.b64encode(msg.encode()).decode()
-    return (
-        "ZTpUeXBlRXJyb3I6IENhbm5vdCByZWFkIHByb3BlcnRpZXMgb2YgdW5kZWZpbmVkIChyZWFkaW5nICdjaGls"
-        "ZE5vZGVzJyk="
-    )
+    """Generate a browser-like Statsig evaluation fallback ID."""
+    if random.choice((True, False)):
+        rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+        msg = f"x1:TypeError: Cannot read properties of null (reading 'children['{rand}']')"
+    else:
+        rand = "".join(random.choices(string.ascii_lowercase, k=10))
+        msg = f"x1:TypeError: Cannot read properties of undefined (reading '{rand}')"
+    return base64.b64encode(msg.encode()).decode()
 
 
 # ---------------------------------------------------------------------------

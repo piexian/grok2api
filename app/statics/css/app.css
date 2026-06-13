@@ -2,6 +2,7 @@
 :root {
   --bg:#fafafa; --bg-card:#fff; --fg:#000; --fg-muted:#666; --fg-subtle:#999;
   --border:#e5e5e5; --radius:6px; --radius-xl:14px;
+  --focus-ring:#2563eb; --focus-ring-soft:rgba(37,99,235,.16);
   --success:#059669; --success-bg:#ecfdf5; --error:#dc2626; --error-bg:#fef2f2; --info:#525252; --info-bg:#f5f5f5;
   --shadow-md:0 4px 16px rgba(0,0,0,.08); --shadow-lg:0 20px 50px rgba(0,0,0,.08);
   --font-sans:'Geist Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -9,13 +10,15 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font-sans);background:var(--bg);color:var(--fg);line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh}
 a{color:inherit;text-decoration:none}
-button,input,textarea{font:inherit;border:none;outline:none;background:none;color:inherit}
+button,input,textarea,select{font:inherit;border:none;background:none;color:inherit}
 button{cursor:pointer}
+:where(a,button,input,textarea,select,[tabindex]):focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 /* Login */
 .login-body{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:#FAF9F5}
 .login-bg{position:fixed;inset:0;z-index:0;background:#FAF9F5}
-.login-shell{position:relative;z-index:1;width:min(420px,92vw);padding:24px}
+.login-shell{position:relative;z-index:1;width:100%;max-width:420px;min-width:0;padding:24px}
 .login-card{background:var(--bg-card);border:1px solid transparent;border-radius:var(--radius-xl);padding:22px;box-shadow:var(--shadow-lg);transition:border-color .2s}
 .login-card:hover{border-color:var(--fg)}
 .login-brand{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-muted);font-weight:600}
@@ -174,6 +177,9 @@ button{cursor:pointer}
 }
 .webui-chatkit-pill-input:focus{
   outline:none !important;box-shadow:none !important
+}
+.webui-chatkit-pill-input:focus-visible{
+  outline:2px solid var(--focus-ring) !important;outline-offset:2px;box-shadow:0 0 0 3px var(--focus-ring-soft) !important
 }
 .webui-chatkit-stage-card{
   min-height:calc(100vh - 300px);display:grid;place-items:center;align-content:center;text-align:center;
@@ -447,10 +453,12 @@ button{cursor:pointer}
 }
 .webui-session-item:hover{background:#efeeea}
 .webui-session-item.active{background:#ece9e1}
+.webui-session-main{min-width:0;display:block;text-align:left;color:inherit;font-size:inherit;line-height:inherit}
 .webui-session-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .webui-session-actions{display:flex;align-items:center;gap:4px;opacity:0;transition:opacity .15s}
 .webui-session-item:hover .webui-session-actions,
-.webui-session-item.active .webui-session-actions{opacity:1}
+.webui-session-item.active .webui-session-actions,
+.webui-session-item:focus-within .webui-session-actions{opacity:1}
 .webui-session-action{
   width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:#75716b
 }
@@ -509,6 +517,7 @@ button{cursor:pointer}
   font-size:14px;line-height:1.6;overflow:hidden
 }
 .msg-edit-textarea:focus{outline:none;box-shadow:none}
+.msg-edit-textarea:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px;box-shadow:0 0 0 3px var(--focus-ring-soft)}
 .msg-edit-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:10px}
 .msg-edit-cancel{
   height:32px;padding:0 10px;border-radius:999px;color:#5f5b55;font-size:13px;font-weight:500
@@ -703,11 +712,17 @@ button{cursor:pointer}
   box-shadow:none;
   border:0;
 }
+.webui-sendbar-model .input:focus-visible{
+  outline:2px solid var(--focus-ring);
+  outline-offset:2px;
+  box-shadow:0 0 0 3px var(--focus-ring-soft);
+}
 .webui-textarea{
   height:36px;min-height:36px;max-height:none;padding:8px 0 !important;margin:0;display:block;align-self:center;overflow:hidden;resize:none !important;
   border-radius:0 !important;border:0 !important;background:transparent !important;line-height:20px;font-size:14px;color:#20201e
 }
 .webui-textarea:focus{outline:none !important;box-shadow:none !important}
+.webui-textarea:focus-visible{outline:2px solid var(--focus-ring) !important;outline-offset:2px;box-shadow:0 0 0 3px var(--focus-ring-soft) !important}
 .webui-textarea::placeholder{line-height:20px;color:#8d877d}
 .webui-primary-btn{
   width:36px;height:36px;padding:0;border-radius:999px;background:#111;color:#fff;font-size:0;font-weight:700;display:grid;place-items:center;flex:0 0 auto
@@ -880,6 +895,11 @@ button{cursor:pointer}
   outline:none !important;
   box-shadow:none !important;
 }
+.webui-masonry-ratio .input:focus-visible{
+  outline:2px solid var(--focus-ring) !important;
+  outline-offset:2px;
+  box-shadow:0 0 0 3px var(--focus-ring-soft) !important;
+}
 .webui-masonry-toolbar{
   display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0
 }
@@ -1031,6 +1051,8 @@ textarea.input.webui-textarea{padding:8px 0 !important;resize:none !important}
 }
 
 @media (max-width: 520px){
+  .login-shell{max-width:100vw;padding:24px 16px}
+  .login-card{width:100%;min-width:0}
   .site-footer{right:12px;bottom:8px;font-size:10px}
   .admin-header-inner{padding:10px 10px 8px}
   .admin-brand{font-size:12px}
@@ -1046,7 +1068,7 @@ textarea.input.webui-textarea{padding:8px 0 !important;resize:none !important}
 }
 
 /* Modal */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:300;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:300;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s;overscroll-behavior:contain;padding:16px}
 .modal-overlay.open{opacity:1;pointer-events:auto}
 .modal{background:var(--bg-card);border-radius:var(--radius-xl);padding:20px;width:min(480px,92vw);box-shadow:var(--shadow-lg);transform:scale(.96);transition:transform .2s}
 .modal-overlay.open .modal{transform:none}
@@ -1126,3 +1148,16 @@ textarea.input.webui-textarea{padding:8px 0 !important;resize:none !important}
 .cb{width:14px;height:14px;accent-color:var(--fg);cursor:pointer}
 .action-btns{display:flex;gap:4px}
 .empty-state{text-align:center;padding:40px;color:var(--fg-muted);font-size:13px}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    scroll-behavior:auto !important;
+    transition-duration:.01ms !important;
+  }
+  .webui-masonry-tile.is-pending .webui-masonry-tile-body,
+  .msg-loading-spinner{
+    animation:none !important;
+  }
+}

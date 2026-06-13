@@ -32,7 +32,7 @@ Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 
 
 - 新增 console.x.ai 路由：`grok-4.3`、`grok-4`、`grok-4.20`、`grok-4.20-reasoning`、`grok-4.20-non-reasoning`、`grok-4.20-multi-agent`、`grok-build-0.1` 通过 `console.x.ai/v1/responses` 调用，basic 账号即可使用。
 - Console 路由支持流式 / 非流式、图片输入、函数工具、OpenAI Responses 事件、Anthropic Messages 转接，以及自动注入 `web_search` 工具。
-- `grok-4.3`、`grok-4`、`grok-4.20` 这类混合思考模型在未显式传入 `reasoning_effort` 时默认使用 `high`；显式传入 `none`、`minimal`、`low` 等值会覆盖默认。
+- `grok-4.3`、`grok-4` 在未显式传入 `reasoning_effort` 时默认使用 `high`；`grok-4.20` 不发送 `reasoning_effort`，避免 Console 上游返回不支持该参数的 `400`。
 - 搜索来源增强：Console 单模型与 multi-agent 返回中的 `web_search_call`、message annotations 都会汇总为 `annotations` / `search_sources`；`features.show_search_sources` 可控制是否在文本尾部追加 Sources。
 - Console 额度独立维护：新增 `console` mode 本地额度窗口（默认 `30 / 15 分钟`），Admin 账号页显示独立 Console 余额卡片，账号明细显示 `C` 额度 pill，并标注真实同步 / 本地估算 / 默认值来源。
 - 账号异常处理调整：`invalid-credentials`、`bad-credentials`、session 失效、账号封禁等明确不可用状态会自动禁用账号；后台取消“异常账户”卡片与筛选，历史异常 / 过期状态统一并入“禁用账户”。

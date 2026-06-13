@@ -37,6 +37,13 @@ _TAG_FILES = "OpenAI - Files"
 
 
 async def _available_pools(request: Request) -> frozenset[str]:
+    from app.dataplane.account import _directory
+
+    if _directory is not None:
+        pools = _directory.available_pools_snapshot()
+        if pools is not None:
+            return pools
+
     repo = getattr(request.app.state, "repository", None)
     if repo is None:
         return frozenset()

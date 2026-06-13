@@ -137,7 +137,10 @@ async def lifespan(app: FastAPI):
     await repo.initialize()
 
     # 2a. First-boot migrations (config seed / account migration from SQLite).
-    from app.platform.startup import run_startup_migrations
+    from app.platform.startup import (
+        run_account_backfill_migrations,
+        run_startup_migrations,
+    )
 
     await run_startup_migrations(
         config_backend=_config._get_backend(),
@@ -243,6 +246,29 @@ async def lifespan(app: FastAPI):
     if is_leader:
         proxy_scheduler.start()
 
+    account_migration_task: asyncio.Task | None = None
+    if is_leader:
+        async def _run_account_backfill_migrations() -> None:
+            try:
+                await run_account_backfill_migrations(
+                    config_backend=_config._get_backend(),
+                    account_repo=repo,
+                )
+                await _config.load()
+                await directory.sync_if_changed()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "account startup backfill migration failed: error={}",
+                    exc,
+                )
+
+        account_migration_task = asyncio.create_task(
+            _run_account_backfill_migrations(),
+            name="account-startup-backfill",
+        )
+
     logger.info("application startup completed")
     yield
 
@@ -250,6 +276,13 @@ async def lifespan(app: FastAPI):
     # Shutdown
     # -----------
     logger.info("application shutdown started")
+    if account_migration_task is not None:
+        account_migration_task.cancel()
+        try:
+            await account_migration_task
+        except asyncio.CancelledError:
+            pass
+
     sync_task.cancel()
     try:
         await sync_task
