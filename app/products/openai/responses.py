@@ -20,6 +20,9 @@ from app.control.account.enums import FeedbackKind
 from app.dataplane.reverse.protocol.xai_chat import classify_line, StreamAdapter
 from app.dataplane.reverse.protocol.xai_console import (
     build_console_input,
+    classify_console_sse_line,
+    client_function_tool_names,
+    ConsoleStreamAdapter,
     convert_openai_tool_choice,
     convert_openai_tools_to_console,
     extract_console_usage,
@@ -145,6 +148,84 @@ async def _emit_fc_events(items: list[dict], base_idx: int):
                 "output_index": out_idx,
                 "item": item,
             })
+
+
+def _message_added_event(message_id: str, *, output_index: int = 0) -> str:
+    return format_sse(
+        "response.output_item.added", {
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "status": "in_progress",
+            },
+        })
+
+
+def _content_part_added_event(message_id: str, *, output_index: int = 0) -> str:
+    return format_sse(
+        "response.content_part.added", {
+            "type": "response.content_part.added",
+            "item_id": message_id,
+            "output_index": output_index,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": "", "annotations": []},
+        })
+
+
+def _text_delta_event(message_id: str, text: str, *, output_index: int = 0) -> str:
+    return format_sse(
+        "response.output_text.delta", {
+            "type": "response.output_text.delta",
+            "item_id": message_id,
+            "output_index": output_index,
+            "content_index": 0,
+            "delta": text,
+        })
+
+
+def _message_done_item(message_id: str, text: str) -> dict:
+    return {
+        "id": message_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [{
+            "type": "output_text",
+            "text": text,
+            "annotations": [],
+        }],
+        "status": "completed",
+    }
+
+
+def _console_function_output_items(
+    response_json: dict[str, Any],
+    function_tool_names: set[str],
+) -> list[dict]:
+    if not function_tool_names:
+        return []
+    items: list[dict] = []
+    for item in response_json.get("output") or []:
+        if not isinstance(item, dict) or item.get("type") != "function_call":
+            continue
+        name = str(item.get("name") or "").strip()
+        if name not in function_tool_names:
+            continue
+        call_id = str(item.get("call_id") or item.get("id") or "").strip()
+        if not call_id:
+            continue
+        items.append({
+            "id": str(item.get("id") or call_id),
+            "type": "function_call",
+            "call_id": call_id,
+            "name": name,
+            "arguments": str(item.get("arguments") or "{}"),
+            "status": "completed",
+        })
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +363,7 @@ async def _console_responses_dispatch(
     # using the console route. The upstream emits web_search_call output
     # items which are relayed downstream so clients can see citation URLs.
     console_tools = inject_web_search_tool(console_tools)
+    function_tool_names = client_function_tool_names(tools)
 
     from app.dataplane.account import _directory as _acct_dir
     if _acct_dir is None:
@@ -291,6 +373,8 @@ async def _console_responses_dispatch(
     max_retries = selection_max_retries()
     retry_codes = _configured_retry_codes(cfg)
     timeout_s = cfg.get_float("chat.timeout", 120.0)
+    response_id = make_resp_id("resp")
+    message_id = make_resp_id("msg")
 
     # ── Streaming ────────────────────────────────────────────────────────────
     if stream:
@@ -328,28 +412,115 @@ async def _console_responses_dispatch(
                             timeout_s=timeout_s,
                         )
                         try:
-                            # Relay upstream SSE events. Upstream uses
-                            # OpenAI Responses API format natively, so we
-                            # reconstruct event/data blocks and forward.
-                            current_event = ""
-                            async for raw_line in response.aiter_lines():
-                                if isinstance(raw_line, bytes):
-                                    raw_line = raw_line.decode("utf-8", "replace")
-                                raw_line = raw_line.rstrip("\r")
-                                if not raw_line:
-                                    continue
-                                if raw_line.startswith("event:"):
-                                    current_event = raw_line[6:].strip()
-                                    continue
-                                if raw_line.startswith("data:"):
-                                    data = raw_line[5:].strip()
-                                    if data == "[DONE]":
+                            if function_tool_names:
+                                adapter = ConsoleStreamAdapter(
+                                    function_tool_names=function_tool_names
+                                )
+                                yield format_sse(
+                                    "response.created", {
+                                        "type": "response.created",
+                                        "response": make_resp_object(
+                                            response_id,
+                                            model,
+                                            "in_progress",
+                                            [],
+                                        ),
+                                    })
+                                yield ": heartbeat\n\n"
+                                async for raw_line in response.aiter_lines():
+                                    kind, payload = classify_console_sse_line(raw_line)
+                                    if kind == "event":
+                                        adapter.feed_event(payload)
+                                        continue
+                                    if kind != "data" or not payload:
+                                        continue
+                                    if payload == "[DONE]":
                                         break
-                                    if current_event:
-                                        yield f"event: {current_event}\ndata: {data}\n\n"
-                                    else:
-                                        yield f"data: {data}\n\n"
-                                    current_event = ""
+                                    adapter.feed_data(payload)
+
+                                function_items = adapter.function_call_items
+                                usage_data = adapter.usage
+                                input_tokens = (
+                                    usage_data.get("prompt_tokens", 0)
+                                    if usage_data else estimate_prompt_tokens(messages)
+                                )
+                                if function_items:
+                                    async for event in _emit_fc_events(function_items, 0):
+                                        yield event
+                                    output_tokens = (
+                                        usage_data.get("completion_tokens", 0)
+                                        if usage_data else estimate_tool_call_tokens(adapter.parsed_tool_calls)
+                                    )
+                                    yield format_sse(
+                                        "response.completed", {
+                                            "type": "response.completed",
+                                            "response": make_resp_object(
+                                                response_id,
+                                                model,
+                                                "completed",
+                                                function_items,
+                                                build_resp_usage(input_tokens, output_tokens),
+                                            ),
+                                        })
+                                else:
+                                    full_text = adapter.full_text
+                                    yield _message_added_event(message_id)
+                                    yield _content_part_added_event(message_id)
+                                    if full_text:
+                                        yield _text_delta_event(message_id, full_text)
+                                    yield format_sse(
+                                        "response.output_text.done", {
+                                            "type": "response.output_text.done",
+                                            "item_id": message_id,
+                                            "output_index": 0,
+                                            "content_index": 0,
+                                            "text": full_text,
+                                        })
+                                    msg_item = _message_done_item(message_id, full_text)
+                                    yield format_sse(
+                                        "response.output_item.done", {
+                                            "type": "response.output_item.done",
+                                            "output_index": 0,
+                                            "item": msg_item,
+                                        })
+                                    output_tokens = (
+                                        usage_data.get("completion_tokens", 0)
+                                        if usage_data else estimate_tokens(full_text)
+                                    )
+                                    yield format_sse(
+                                        "response.completed", {
+                                            "type": "response.completed",
+                                            "response": make_resp_object(
+                                                response_id,
+                                                model,
+                                                "completed",
+                                                [msg_item],
+                                                build_resp_usage(input_tokens, output_tokens),
+                                            ),
+                                        })
+                            else:
+                                # Relay upstream SSE events. Upstream uses
+                                # OpenAI Responses API format natively, so we
+                                # reconstruct event/data blocks and forward.
+                                current_event = ""
+                                async for raw_line in response.aiter_lines():
+                                    if isinstance(raw_line, bytes):
+                                        raw_line = raw_line.decode("utf-8", "replace")
+                                    raw_line = raw_line.rstrip("\r")
+                                    if not raw_line:
+                                        continue
+                                    if raw_line.startswith("event:"):
+                                        current_event = raw_line[6:].strip()
+                                        continue
+                                    if raw_line.startswith("data:"):
+                                        data = raw_line[5:].strip()
+                                        if data == "[DONE]":
+                                            break
+                                        if current_event:
+                                            yield f"event: {current_event}\ndata: {data}\n\n"
+                                        else:
+                                            yield f"data: {data}\n\n"
+                                        current_event = ""
                         finally:
                             await session.__aexit__(None, None, None)
 
@@ -493,6 +664,30 @@ async def _console_responses_dispatch(
 
     if not response_json:
         raise UpstreamError("Console returned empty response", status=502)
+
+    if function_tool_names:
+        function_items = _console_function_output_items(
+            response_json,
+            function_tool_names,
+        )
+        if function_items:
+            response_json = dict(response_json)
+            response_json["output"] = function_items
+            usage = extract_console_usage(response_json)
+            if not usage.get("output_tokens"):
+                response_json["usage"] = build_resp_usage(
+                    usage.get("prompt_tokens") or estimate_prompt_tokens(messages),
+                    estimate_tool_call_tokens(function_items),
+                )
+        else:
+            output = response_json.get("output")
+            if isinstance(output, list):
+                response_json = dict(response_json)
+                response_json["output"] = [
+                    item
+                    for item in output
+                    if not (isinstance(item, dict) and item.get("type") == "function_call")
+                ]
 
     logger.info(
         "console responses request completed: model={} status={} usage={}",

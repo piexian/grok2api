@@ -39,6 +39,7 @@ from app.dataplane.reverse.protocol.xai_console import (
     build_console_input,
     build_console_payload,
     classify_console_sse_line,
+    client_function_tool_names,
     ConsoleStreamAdapter,
     convert_openai_tool_choice,
     convert_openai_tools_to_console,
@@ -586,6 +587,7 @@ async def _console_completions(
     # the account's prepaid (trial) credits. Idempotent: existing
     # ``web_search`` tool in the request is preserved.
     console_tools = inject_web_search_tool(console_tools)
+    function_tool_names = client_function_tool_names(tools)
 
     from app.dataplane.account import _directory as _acct_dir
 
@@ -618,8 +620,8 @@ async def _console_completions(
                 success = False
                 _retry = False
                 fail_exc: BaseException | None = None
-                adapter = ConsoleStreamAdapter()
-                tool_calls_emitted = False
+                adapter = ConsoleStreamAdapter(function_tool_names=function_tool_names)
+                buffered_text: list[str] = []
 
                 try:
                     try:
@@ -647,14 +649,18 @@ async def _console_completions(
                                 ev = adapter.feed_data(payload)
                                 ev_kind = ev.get("kind")
                                 if ev_kind == "text":
+                                    if function_tool_names:
+                                        buffered_text.append(ev["content"])
+                                        continue
                                     chunk = make_stream_chunk(response_id, model, ev["content"])
                                     yield f"data: {orjson.dumps(chunk).decode()}\n\n"
                                 elif ev_kind == "thinking" and emit_think:
                                     chunk = make_thinking_chunk(response_id, model, ev["content"])
                                     yield f"data: {orjson.dumps(chunk).decode()}\n\n"
                                 elif ev_kind == "tool_call_start":
+                                    if function_tool_names:
+                                        continue
                                     # First chunk for this tool call: id + name + empty args
-                                    tool_calls_emitted = True
                                     chunk = make_tool_call_chunk(
                                         response_id,
                                         model,
@@ -666,6 +672,8 @@ async def _console_completions(
                                     )
                                     yield f"data: {orjson.dumps(chunk).decode()}\n\n"
                                 elif ev_kind == "tool_call_args":
+                                    if function_tool_names:
+                                        continue
                                     # Subsequent chunks: incremental args delta
                                     chunk = make_tool_call_chunk(
                                         response_id,
@@ -692,12 +700,43 @@ async def _console_completions(
                             await session.__aexit__(None, None, None)
 
                         # Stream completed — emit appropriate final chunk
-                        if tool_calls_emitted:
-                            done_chunk = make_tool_call_done_chunk(response_id, model)
+                        parsed_tool_calls = (
+                            adapter.parsed_tool_calls if function_tool_names else []
+                        )
+                        if parsed_tool_calls:
+                            for i, tc in enumerate(parsed_tool_calls):
+                                chunk = make_tool_call_chunk(
+                                    response_id,
+                                    model,
+                                    i,
+                                    tc.call_id,
+                                    tc.name,
+                                    tc.arguments,
+                                    is_first=True,
+                                )
+                                yield f"data: {orjson.dumps(chunk).decode()}\n\n"
+                            usage_data = adapter.usage
+                            pt = (
+                                usage_data.get("prompt_tokens", 0)
+                                if usage_data else estimate_prompt_tokens(prompt_text)
+                            )
+                            ct = (
+                                usage_data.get("completion_tokens", 0)
+                                if usage_data else estimate_tool_call_tokens(parsed_tool_calls)
+                            )
+                            done_chunk = make_tool_call_done_chunk(
+                                response_id,
+                                model,
+                                usage=build_usage(pt, ct),
+                            )
                             if adapter.search_sources:
                                 done_chunk["search_sources"] = list(adapter.search_sources)
                             yield f"data: {orjson.dumps(done_chunk).decode()}\n\n"
                         else:
+                            if buffered_text:
+                                for tok in buffered_text:
+                                    chunk = make_stream_chunk(response_id, model, tok)
+                                    yield f"data: {orjson.dumps(chunk).decode()}\n\n"
                             chat_anns = (
                                 _to_chat_annotations(adapter.annotations) if adapter.annotations else None)
                             # Append ## Sources markdown block when
@@ -832,7 +871,10 @@ async def _console_completions(
 
                 full_text = extract_console_text(response_json)
                 full_thinking = (extract_console_reasoning(response_json) if emit_think else "")
-                response_tool_calls = extract_console_tool_calls(response_json)
+                response_tool_calls = extract_console_tool_calls(
+                    response_json,
+                    function_tool_names,
+                )
                 response_annotations = extract_console_annotations(response_json)
                 response_search_sources = extract_console_search_sources(response_json)
                 usage = extract_console_usage(response_json)
@@ -901,12 +943,16 @@ async def _console_completions(
                 arguments=tc["function"]["arguments"],
             ) for tc in response_tool_calls
         ]
+        tool_completion_tokens = (
+            usage.get("completion_tokens")
+            or estimate_tool_call_tokens(parsed_calls)
+        )
         resp = make_tool_call_response(
             model,
             parsed_calls,
             prompt_content=prompt_text,
             response_id=response_id,
-            usage=build_usage(pt, ct + rt, reasoning_tokens=rt),
+            usage=build_usage(pt, tool_completion_tokens + rt, reasoning_tokens=rt),
         )
         if response_search_sources:
             resp["search_sources"] = response_search_sources
