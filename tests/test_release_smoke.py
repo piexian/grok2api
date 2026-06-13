@@ -18,6 +18,7 @@ from app.control.account.quota_defaults import (
     usage_sync_mode_ids,
 )
 from app.control.account.refresh import (
+    AccountRefreshService,
     RefreshResult,
     _get_accounts_by_tokens,
     _prioritize_refresh_records,
@@ -408,6 +409,53 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             page = await repo.list_accounts(ListAccountsQuery(page=1, page_size=10))
             self.assertEqual(page.total, 1)
             await repo.close()
+
+    async def test_console_quota_reset_timer_starts_at_low_remaining_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            try:
+                await repo.upsert_accounts(
+                    [AccountUpsert(token="tok_console_timer", pool="basic")]
+                )
+                await repo.patch_accounts(
+                    [
+                        AccountPatch(
+                            token="tok_console_timer",
+                            quota_console={
+                                "remaining": 17,
+                                "total": 30,
+                                "window_seconds": 900,
+                                "reset_at": None,
+                                "synced_at": None,
+                                "source": int(QuotaSource.DEFAULT),
+                            },
+                        )
+                    ]
+                )
+
+                svc = AccountRefreshService(repo)
+                await svc.refresh_call_async(
+                    "tok_console_timer",
+                    int(ModeId.CONSOLE),
+                )
+                record = (await repo.get_accounts(["tok_console_timer"]))[0]
+                console = record.quota_set().console
+                self.assertIsNotNone(console)
+                self.assertEqual(console.remaining, 16)
+                self.assertIsNone(console.reset_at)
+
+                await svc.refresh_call_async(
+                    "tok_console_timer",
+                    int(ModeId.CONSOLE),
+                )
+                record = (await repo.get_accounts(["tok_console_timer"]))[0]
+                console = record.quota_set().console
+                self.assertIsNotNone(console)
+                self.assertEqual(console.remaining, 15)
+                self.assertIsNotNone(console.reset_at)
+            finally:
+                await repo.close()
 
     async def test_admin_tokens_includes_console_quota(self):
         with tempfile.TemporaryDirectory() as tmp:

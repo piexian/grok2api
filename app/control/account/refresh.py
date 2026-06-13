@@ -641,11 +641,19 @@ class AccountRefreshService:
                             source=QuotaSource.DEFAULT,
                         ).to_dict()
                 else:
+                    new_remaining = max(0, existing.remaining - 1)
                     reset_at = existing.reset_at
-                    if reset_at is None and existing.window_seconds > 0:
+                    if mode_id == 5:
+                        if (
+                            reset_at is None
+                            and new_remaining <= 15
+                            and existing.window_seconds > 0
+                        ):
+                            reset_at = now + existing.window_seconds * 1000
+                    elif reset_at is None and existing.window_seconds > 0:
                         reset_at = now + existing.window_seconds * 1000
                     quota_patch[mode_key] = QuotaWindow(
-                        remaining=max(0, existing.remaining - 1),
+                        remaining=new_remaining,
                         total=existing.total,
                         window_seconds=existing.window_seconds,
                         reset_at=reset_at,
