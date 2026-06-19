@@ -47,6 +47,7 @@ async def reserve_account(
     *,
     exclude_tokens: list[str] | None = None,
     now_s_override: int | None = None,
+    console_model: str | None = None,
 ):
     """Reserve an account and return ``(lease, selected_mode_id)``.
 
@@ -57,6 +58,14 @@ async def reserve_account(
     original_mode_id = int(spec.mode_id)
 
     async def _try_reserve():
+        if spec.is_console():
+            lease = await directory.reserve_any(
+                pool_candidates=spec.pool_candidates(),
+                exclude_tokens=exclude_tokens,
+                now_s_override=now_s_override,
+                console_model=console_model or spec.console_model,
+            )
+            return lease, original_mode_id
         for candidate_mode_id in mode_candidates(spec):
             lease = await directory.reserve(
                 pool_candidates=spec.pool_candidates(),
@@ -71,6 +80,9 @@ async def reserve_account(
     lease, selected_mode_id = await _try_reserve()
     if lease is not None:
         return lease, selected_mode_id
+
+    if spec.is_console():
+        return None, original_mode_id
 
     if current_strategy() == "random":
         return None, original_mode_id

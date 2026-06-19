@@ -2,10 +2,10 @@
 
 Canonical quota totals per pool type (from upstream rate-limits API):
 
-              auto    fast    expert    heavy    grok_4_3
-  basic          —      30       —        —         —        window: 86400 s
-  super         50     140      50        —        50        window: 7200 s
-  heavy        150     400     150       20       150        window: 7200 s
+              auto    fast    expert    heavy
+  basic          —      30       —        —        window: 86400 s
+  super         50     140      50        —        window: 7200 s
+  heavy        150     400     150       20       window: 7200 s
 
 Console.x.ai models use a local-only quota window shared by every pool:
 30 calls / 15 minutes. The grok.com rate-limits API does not know this
@@ -61,7 +61,6 @@ LITE_QUOTA_DEFAULTS = AccountQuotaSet(
     auto=_w(25, 25, 7_200),  # 25  queries / 2 h
     fast=_w(70, 70, 7_200),  # 70  queries / 2 h
     expert=_w(12, 12, 7_200),  # 12  queries / 2 h
-    grok_4_3=_w(12, 12, 7_200),  # 12  queries / 2 h
     console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
@@ -69,7 +68,6 @@ SUPER_QUOTA_DEFAULTS = AccountQuotaSet(
     auto=_w(50, 50, 7_200),  # 50  queries / 2 h
     fast=_w(140, 140, 7_200),  # 140 queries / 2 h
     expert=_w(50, 50, 7_200),  # 50  queries / 2 h
-    grok_4_3=_w(50, 50, 7_200),  # 50  queries / 2 h
     console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
@@ -78,7 +76,6 @@ HEAVY_QUOTA_DEFAULTS = AccountQuotaSet(
     fast=_w(400, 400, 7_200),  # 400 queries / 2 h
     expert=_w(150, 150, 7_200),  # 150 queries / 2 h
     heavy=_w(20, 20, 7_200),  # 20  queries / 2 h
-    grok_4_3=_w(150, 150, 7_200),  # 150 queries / 2 h
     console=_w(CONSOLE_LIMIT, CONSOLE_LIMIT, CONSOLE_WINDOW_SECONDS),
 )
 
@@ -92,9 +89,9 @@ _POOL_DEFAULTS: dict[str, AccountQuotaSet] = {
 
 _SUPPORTED_MODE_IDS_BY_POOL: dict[str, frozenset[int]] = {
     "basic": frozenset((1, 5)),
-    "lite": frozenset((0, 1, 2, 4, 5)),
-    "super": frozenset((0, 1, 2, 4, 5)),
-    "heavy": frozenset((0, 1, 2, 3, 4, 5)),
+    "lite": frozenset((0, 1, 2, 5)),
+    "super": frozenset((0, 1, 2, 5)),
+    "heavy": frozenset((0, 1, 2, 3, 5)),
 }
 
 
@@ -138,7 +135,7 @@ def usage_sync_mode_ids(pool: str) -> tuple[int, ...]:
     """Return grok.com rate-limits API mode IDs for *pool*.
 
     Console mode (5) is local-only and must never be sent to the upstream
-    usage endpoint, whose supported model names only cover modes 0..4.
+    usage endpoint, whose current model names only cover modes 0..3.
     """
     return tuple(mode_id for mode_id in supported_mode_ids(pool) if mode_id != 5)
 

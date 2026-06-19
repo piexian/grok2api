@@ -20,7 +20,6 @@ _MODE_NAMES: dict[int, str] = {
     1: "fast",
     2: "expert",
     3: "heavy",
-    4: "grok-420-computer-use-sa",
 }
 
 # Default window durations used as fallback when API call fails.
@@ -29,7 +28,6 @@ _DEFAULT_WINDOW_SECS: dict[int, int] = {
     1: 86_400,  # fast   — 24 h (basic; real value overrides for super/heavy)
     2: 7_200,  # expert — 2 h  (super/heavy only)
     3: 7_200,  # heavy  — 2 h  (heavy-pool only)
-    4: 7_200,  # grok_4_3 — 2 h  (super/heavy only)
 }
 
 

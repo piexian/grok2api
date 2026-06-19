@@ -107,7 +107,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.7")
+        self.assertEqual(get_project_version(), "2.0.9")
 
     def test_prerelease_version_update_ordering(self):
         self.assertTrue(_is_newer("2.0.7", "2.0.7-beta"))
@@ -120,9 +120,9 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(supported_mode_ids("basic"), (1, 5))
         self.assertEqual(usage_sync_mode_ids("basic"), (1,))
         self.assertEqual(_quota_probe_mode_ids("basic"), (0, 1))
-        self.assertEqual(supported_mode_ids("super"), (0, 1, 2, 4, 5))
-        self.assertEqual(usage_sync_mode_ids("super"), (0, 1, 2, 4))
-        self.assertEqual(_quota_probe_mode_ids("super"), (0, 1, 2, 4))
+        self.assertEqual(supported_mode_ids("super"), (0, 1, 2, 5))
+        self.assertEqual(usage_sync_mode_ids("super"), (0, 1, 2))
+        self.assertEqual(_quota_probe_mode_ids("super"), (0, 1, 2))
 
         console = default_quota_set("basic").console
         self.assertIsNotNone(console)
@@ -410,7 +410,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(page.total, 1)
             await repo.close()
 
-    async def test_console_quota_reset_timer_starts_at_low_remaining_threshold(self):
+    async def test_console_success_sync_records_usage_without_local_quota_decrement(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = LocalAccountRepository(Path(tmp) / "accounts.db")
             await repo.initialize()
@@ -442,18 +442,10 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 record = (await repo.get_accounts(["tok_console_timer"]))[0]
                 console = record.quota_set().console
                 self.assertIsNotNone(console)
-                self.assertEqual(console.remaining, 16)
+                self.assertEqual(console.remaining, 17)
                 self.assertIsNone(console.reset_at)
-
-                await svc.refresh_call_async(
-                    "tok_console_timer",
-                    int(ModeId.CONSOLE),
-                )
-                record = (await repo.get_accounts(["tok_console_timer"]))[0]
-                console = record.quota_set().console
-                self.assertIsNotNone(console)
-                self.assertEqual(console.remaining, 15)
-                self.assertIsNotNone(console.reset_at)
+                self.assertEqual(record.usage_use_count, 1)
+                self.assertIsNotNone(record.last_use_at)
             finally:
                 await repo.close()
 
@@ -585,7 +577,13 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = LocalAccountRepository(Path(tmp) / "accounts.db")
             await repo.initialize()
-            await repo.upsert_accounts([AccountUpsert(token="tok_http", pool="basic")])
+            await repo.upsert_accounts(
+                [
+                    AccountUpsert(token="tok_http_basic", pool="basic"),
+                    AccountUpsert(token="tok_http_super", pool="super"),
+                    AccountUpsert(token="tok_http_heavy", pool="heavy"),
+                ]
+            )
             app.state.repository = repo
             try:
                 status, body = await _asgi_get("/health")
@@ -594,13 +592,21 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.7")
+                self.assertEqual(json.loads(body)["version"], "2.0.9")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)
                 ids = {item["id"] for item in json.loads(body)["data"]}
+                self.assertIn("grok-4.3-fast", ids)
+                self.assertIn("grok-4.3-auto", ids)
+                self.assertIn("grok-4.3-expert", ids)
+                self.assertIn("grok-4.3-heavy", ids)
                 self.assertIn("grok-4.3", ids)
-                self.assertIn("grok-4.20", ids)
                 self.assertIn("grok-build-0.1", ids)
+                self.assertIn("grok-4.20-0309-non-reasoning", ids)
+                self.assertIn("grok-4.20-0309-reasoning", ids)
+                self.assertIn("grok-4.20-multi-agent-0309", ids)
+                self.assertNotIn("grok-4.20-auto", ids)
+                self.assertNotIn("grok-4.3-beta", ids)
             finally:
                 await repo.close()

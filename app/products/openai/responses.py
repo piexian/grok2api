@@ -387,6 +387,7 @@ async def _console_responses_dispatch(
                     spec,
                     now_s_override=now_s(),
                     exclude_tokens=excluded or None,
+                    console_model=console_model,
                 )
                 if acct is None:
                     raise RateLimitError("No available accounts for this model tier")
@@ -502,6 +503,7 @@ async def _console_responses_dispatch(
                                 # Relay upstream SSE events. Upstream uses
                                 # OpenAI Responses API format natively, so we
                                 # reconstruct event/data blocks and forward.
+                                yield ": heartbeat\n\n"
                                 current_event = ""
                                 async for raw_line in response.aiter_lines():
                                     if isinstance(raw_line, bytes):
@@ -560,7 +562,14 @@ async def _console_responses_dispatch(
                     kind = (
                         FeedbackKind.SUCCESS
                         if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR)
-                    await directory.feedback(token, kind, selected_mode_id, now_s_val=now_s())
+                    await directory.feedback(
+                        token,
+                        kind,
+                        selected_mode_id,
+                        now_s_val=now_s(),
+                        console_model=console_model,
+                        upstream_error=fail_exc,
+                    )
                     if success:
                         asyncio.create_task(_quota_sync(
                             token, selected_mode_id)).add_done_callback(_log_task_exception)
@@ -583,6 +592,7 @@ async def _console_responses_dispatch(
             spec,
             now_s_override=now_s(),
             exclude_tokens=excluded or None,
+            console_model=console_model,
         )
         if acct is None:
             raise RateLimitError("No available accounts for this model tier")
@@ -651,7 +661,14 @@ async def _console_responses_dispatch(
             kind = (
                 FeedbackKind.SUCCESS
                 if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR)
-            await directory.feedback(token, kind, selected_mode_id, now_s_val=now_s())
+            await directory.feedback(
+                token,
+                kind,
+                selected_mode_id,
+                now_s_val=now_s(),
+                console_model=console_model,
+                upstream_error=fail_exc,
+            )
             if success:
                 asyncio.create_task(_quota_sync(token, selected_mode_id)).add_done_callback(_log_task_exception)
             else:
@@ -813,6 +830,7 @@ async def create(
                         })
 
                     ended = False
+                    yield ": heartbeat\n\n"
                     async for line in _stream_chat(
                             token=token,
                             mode_id=ModeId(selected_mode_id),

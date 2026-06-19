@@ -30,10 +30,9 @@ class ModelSpec:
                     ``reasoning.effort`` to the console upstream when the
                     caller doesn't specify ``reasoning_effort`` themselves.
                     Use ``"high"`` for hybrid reasoning models that support
-                    the effort field (grok-4, grok-4.3). Leave empty for
-                    models that reject effort with HTTP 400 (grok-4.20 and
-                    grok-4.20-reasoning) or don't reason at all
-                    (grok-4.20-non-reasoning).
+                    the effort field (grok-4.3). Leave empty for
+                    models that reject effort with HTTP 400 (grok-4.20-0309
+                    variants and grok-build-0.1).
                     Only consulted when ``console_model`` is set; ignored
                     on the legacy grok.com path.
     """

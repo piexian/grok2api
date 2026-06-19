@@ -1,133 +1,40 @@
-<img alt="Grok2API" src="https://github.com/user-attachments/assets/037a0a6e-7986-41cc-b4af-04df612ee886" />
+<h1 align="center">Grok2API</h1>
 
-[![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Version](https://img.shields.io/badge/version-2.0.8-111827)](pyproject.toml)
-[![License](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
-[![English](https://img.shields.io/badge/English-2563EB?logo=bookstack&logoColor=white)](docs/README.en.md)
-[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chenyme/grok2api)
-[![项目文档](https://img.shields.io/badge/项目文档-0F766E?logo=readthedocs&logoColor=white)](https://blog.cheny.me/blog/posts/grok2api)
+<p align="center">
+  <strong>面向当前 grok.com / console.x.ai 的 Grok OpenAI 兼容网关</strong>
+</p>
 
+<p align="center">
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
+  <a href="pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.9-111827"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
+  <a href="docs/README.en.md"><img alt="English" src="https://img.shields.io/badge/English-2563EB?logo=bookstack&logoColor=white"></a>
+</p>
+
+> [!IMPORTANT]
+> 原上游仓库已经归档并停止维护。
 
 > [!NOTE]
-> 本项目仅供学习与研究交流。请务必遵循 Grok 的使用条款及当地法律法规，不得用于非法用途！二开与 PR 请保留原作者与前端标识。
+> 本项目仅供学习、研究和自托管网关场景使用。请遵守 xAI / Grok 服务条款及所在地法律法规。账号、Cookie、Cloudflare clearance 与 API key 都属于敏感信息，请自行妥善保管。
 
-<br>
+## 项目定位
 
-Grok2API 是一个基于 **FastAPI** 构建的 Grok 网关，支持将 Grok Web 能力以 OpenAI 兼容 API 的方式转换。核心特性：
-- OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/images/edits`、`/v1/videos`、`/v1/videos/{video_id}`、`/v1/videos/{video_id}/content`
-- Anthropic 兼容接口：`/v1/messages`
-- 支持流式与非流式对话、显式思考输出、函数工具结构透传，以及统一的 token / usage 统计
-- 支持多账号池、层级选号、失败反馈、额度同步与自动维护
-- 支持 console.x.ai `/v1/responses` 路由，可通过 OpenAI / Anthropic 兼容接口调用 Console 模型与 Web Search
-- 支持本地缓存图片、视频与本地代理链接返回
-- 支持文生图、图像编辑、文生视频、图生视频
-- 内置 Admin 后台管理、Web Chat、Masonry 生图、ChatKit 语音页面，账号页支持 Console 额度独立展示
+Grok2API 将 Grok Web、console.x.ai、Imagine 和相关媒体接口统一封装成 OpenAI / Anthropic 兼容 API。它适合需要多账号池、统一鉴权、流式输出、图片/视频代理、Admin 管理和 WebUI 的自托管场景。
 
-<br>
+## 主要能力
 
-## 2.0.8 更新重点
+- OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/images/edits`、`/v1/videos`。
+- Anthropic 兼容接口：`/v1/messages`。
+- 多账号池：basic / lite / super / heavy 分层选择，支持本地、Redis、MySQL、PostgreSQL 存储。
+- 配额与失败反馈：grok.com 文本模型使用上游 quota；console.x.ai 使用独立运行时限速和冷却，不与 grok.com Chat 混算。
+- 媒体能力：文生图、图片编辑、文生视频、图生视频、图片/视频本地缓存和代理链接。
+- Web 产品：Admin 后台、Web Chat、Masonry 生图页、ChatKit 语音页面。
+- 代理与 Cloudflare：支持 direct、单代理、代理池、手动 clearance、FlareSolverr。
 
-> 以下为 `v2.0.4.rc4` 之后到当前版本的主要变化摘要。
+## 快速部署
 
-- 新增 console.x.ai 路由：`grok-4.3`、`grok-4`、`grok-4.20`、`grok-4.20-reasoning`、`grok-4.20-non-reasoning`、`grok-4.20-multi-agent`、`grok-build-0.1` 通过 `console.x.ai/v1/responses` 调用，basic 账号即可使用。
-- Console 路由支持流式 / 非流式、图片输入、函数工具、OpenAI Responses 事件、Anthropic Messages 转接，以及自动注入 `web_search` 工具。
-- `grok-4.3`、`grok-4` 在未显式传入 `reasoning_effort` 时默认使用 `high`；`grok-4.20` 不发送 `reasoning_effort`，避免 Console 上游返回不支持该参数的 `400`。
-- 搜索来源增强：Console 单模型与 multi-agent 返回中的 `web_search_call`、message annotations 都会汇总为 `annotations` / `search_sources`；`features.show_search_sources` 可控制是否在文本尾部追加 Sources。
-- Console 额度独立维护：新增 `console` mode 本地额度窗口（默认 `30 / 15 分钟`），Admin 账号页显示独立 Console 余额卡片，账号明细显示 `C` 额度 pill，并标注真实同步 / 本地估算 / 默认值来源。
-- 账号异常处理调整：`invalid-credentials`、`bad-credentials`、session 失效、账号封禁等明确不可用状态会自动禁用账号；后台取消“异常账户”卡片与筛选，历史异常 / 过期状态统一并入“禁用账户”。
-- console.x.ai 返回 `402` 时按额度耗尽处理，账号池会临时绕开该账号，避免持续命中已耗尽的 Console 余额。
-- WebUI 模型下拉框会按当前账号池等级过滤，减少选择到无可用账号层级模型后的失败。
-- 当前预构建镜像：`ghcr.io/piexian/grok2api:2.0.8`；`ghcr.io/piexian/grok2api:latest` 已指向同一镜像。
-
-<br>
-
-## 服务架构
-
-```mermaid
-flowchart LR
-    Client["Clients\nOpenAI SDK / curl / Browser"] --> API["FastAPI App"]
-
-    subgraph Products["Products"]
-        direction TB
-        OpenAI["OpenAI APIs\n/v1/*"]
-        Anthropic["Anthropic APIs\n/v1/messages"]
-        Web["Web Products\n/admin /webui/*"]
-    end
-
-    subgraph Control["Control"]
-        direction TB
-        Models["Model Registry"]
-        Accounts["Account Services"]
-        Proxies["Proxy Services"]
-    end
-
-    subgraph Dataplane["Dataplane"]
-        direction TB
-        Reverse["Reverse Protocol + Transport"]
-        AccountDP["AccountDirectory"]
-        ProxyDP["Proxy Runtime"]
-    end
-
-    subgraph Platform["Platform"]
-        direction TB
-        Tokens["Token Estimation"]
-        Storage["Storage"]
-        Config["Config Snapshot"]
-        Auth["Auth"]
-        Log["Logging"]
-    end
-
-    API --> OpenAI
-    API --> Anthropic
-    API --> Web
-
-    OpenAI --> Models
-    OpenAI --> AccountDP
-    OpenAI --> ProxyDP
-    OpenAI --> Reverse
-    OpenAI --> Tokens
-    OpenAI --> Storage
-
-    Anthropic --> Models
-    Anthropic --> AccountDP
-    Anthropic --> ProxyDP
-    Anthropic --> Reverse
-    Anthropic --> Tokens
-
-    Web --> Accounts
-    Web --> Config
-    Web --> Auth
-
-    Accounts --> AccountDP
-    Proxies --> ProxyDP
-    Models --> Reverse
-```
-
-<br>
-
-## 快速开始
-
-### 本地部署
-
-```bash
-git clone https://github.com/chenyme/grok2api
-cd grok2api
-cp .env.example .env
-uv sync
-uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
-```
-
-### Docker Compose
-
-```bash
-git clone https://github.com/chenyme/grok2api
-cd grok2api
-cp .env.example .env
-docker compose up -d
-```
-
-### 预构建镜像
+### Docker
 
 ```bash
 docker run -d \
@@ -141,397 +48,150 @@ docker run -d \
 
 | 镜像 | 说明 |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | 当前 latest，已指向 `2.0.8` |
-| `ghcr.io/piexian/grok2api:2.0.8` | 固定版本标签 |
+| `ghcr.io/piexian/grok2api:latest` | 当前 latest，指向 2.0.9 系列 |
+| `ghcr.io/piexian/grok2api:2.0.9` | 固定版本标签 |
 
-### Vercel
+### Docker Compose
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/chenyme/grok2api&env=LOG_LEVEL,LOG_FILE_ENABLED,DATA_DIR,LOG_DIR,ACCOUNT_STORAGE,ACCOUNT_REDIS_URL,ACCOUNT_MYSQL_URL,ACCOUNT_POSTGRESQL_URL)
+```bash
+git clone https://github.com/piexian/grok2api
+cd grok2api
+cp .env.example .env
+docker compose up -d
+```
 
-### Render
+### 本地运行
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chenyme/grok2api)
+```bash
+git clone https://github.com/piexian/grok2api
+cd grok2api
+cp .env.example .env
+uv sync
+uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
+```
 
-### 首次启动
+首次启动后至少配置：
 
-1. 修改 `app.app_key`
-2. 设置 `app.api_key`
-3. 设置 `app.app_url`（否则图片、视频的链接会 403 无权访问）
+| 配置项 | 用途 |
+| :-- | :-- |
+| `app.api_key` | `/v1/*` API 鉴权 |
+| `app.app_key` | Admin 后台密码 |
+| `app.app_url` | 本地图片/视频代理链接的外部访问地址 |
+| `app.webui_enabled` / `app.webui_key` | WebUI 开关和访问密码 |
 
-<br>
-
-## WebUI
-
-### 页面入口
+## 页面入口
 
 | 页面 | 路径 |
 | :-- | :-- |
-| Admin 登录页 | `/admin/login` |
+| Admin 登录 | `/admin/login` |
 | 账号管理 | `/admin/account` |
 | 配置管理 | `/admin/config` |
 | 缓存管理 | `/admin/cache` |
-| WebUI 登录页 | `/webui/login` |
+| WebUI 登录 | `/webui/login` |
 | Web Chat | `/webui/chat` |
-| Masonry | `/webui/masonry` |
-| ChatKit | `/webui/chatkit` |
+| Masonry 生图 | `/webui/masonry` |
+| ChatKit 语音 | `/webui/chatkit` |
 
-### 鉴权规则
+## 模型表
 
-| 范围 | 配置项 | 规则 |
-| :-- | :-- | :-- |
-| `/v1/*` | `app.api_key` | 为空则不额外鉴权 |
-| `/admin/*` | `app.app_key` | 默认值 `grok2api` |
-| `/webui/*` | `app.webui_enabled`, `app.webui_key` | 默认关闭；`webui_key` 为空则不额外校验 |
-
-<br>
-
-## 配置体系
-
-### 配置分层
-
-| 位置 | 用途 | 生效时机 |
-| :-- | :-- | :-- |
-| `.env` | 启动前配置 | 服务启动时 |
-| `${DATA_DIR}/config.toml` | 运行时配置 | 保存后即时生效 |
-| `config.defaults.toml` | 默认模板 | 首次初始化时 |
-
-
-
-### 环境变量
-
-| 变量名 | 说明 | 默认值 |
-| :-- | :-- | :-- |
-| `TZ` | 时区 | `Asia/Shanghai` |
-| `LOG_LEVEL` | 日志级别 | `INFO` |
-| `LOG_FILE_ENABLED` | 写入本地文件日志 | `true` |
-| `ACCOUNT_SYNC_INTERVAL` | 账号目录增量同步间隔（秒） | `30` |
-| `ACCOUNT_SYNC_ACTIVE_INTERVAL` | 账号目录检测到变化后的活跃同步间隔（秒） | `3` |
-| `SERVER_HOST` | 服务监听地址 | `0.0.0.0` |
-| `SERVER_PORT` | 服务监听端口 | `8000` |
-| `SERVER_WORKERS` | Granian worker 数量 | `1` |
-| `HOST_PORT` | Docker Compose 宿主机映射端口 | `8000` |
-| `DATA_DIR` | 本地数据根目录（账号库、本地媒体文件、缓存索引统一位于此目录下） | `./data` |
-| `LOG_DIR` | 本地日志目录 | `./logs` |
-| `ACCOUNT_STORAGE` | 账号存储后端 | `local` |
-| `ACCOUNT_LOCAL_PATH` | `local` 模式账号 SQLite 路径 | `${DATA_DIR}/accounts.db` |
-| `ACCOUNT_REDIS_URL` | `redis` 模式 Redis DSN | `""` |
-| `ACCOUNT_MYSQL_URL` | `mysql` 模式 SQLAlchemy DSN | `""` |
-| `ACCOUNT_POSTGRESQL_URL` | `postgresql` 模式 SQLAlchemy DSN | `""` |
-| `ACCOUNT_SQL_POOL_SIZE` | SQL 连接池核心连接数 | `5` |
-| `ACCOUNT_SQL_MAX_OVERFLOW` | SQL 连接池最大溢出连接数 | `10` |
-| `ACCOUNT_SQL_POOL_TIMEOUT` | 等待连接池空闲连接的超时时间（秒） | `30` |
-| `ACCOUNT_SQL_POOL_RECYCLE` | 连接最大复用时间（秒），超时后自动重连 | `1800` |
-| `CONFIG_LOCAL_PATH` | `local` 模式运行时配置文件路径 | `${DATA_DIR}/config.toml` |
-
-运行时配置也支持 `GROK_` 前缀环境变量覆盖，例如 `GROK_APP_API_KEY` 会覆盖 `app.api_key`，`GROK_FEATURES_STREAM` 会覆盖 `features.stream`。
-
-### 系统配置项
-
-| 分组 | 关键项 |
-| :-- | :-- |
-| `app` | `app_key`, `app_url`, `api_key`, `webui_enabled`, `webui_key` |
-| `logging` | `file_level`, `max_files` |
-| `features` | `temporary`, `memory`, `stream`, `thinking`, `auto_chat_mode_fallback`, `thinking_summary`, `dynamic_statsig`, `enable_nsfw`, `show_search_sources`, `custom_instruction`, `image_format`, `imagine_public_image_proxy`, `video_format` |
-| `proxy.egress` | `mode`, `proxy_url`, `proxy_pool`, `resource_proxy_url`, `resource_proxy_pool`, `skip_ssl_verify` |
-| `proxy.clearance` | `mode`, `cf_cookies`, `user_agent`, `browser`, `flaresolverr_url`, `timeout_sec`, `refresh_interval` |
-| `retry` | `reset_session_status_codes`, `max_retries`, `on_codes` |
-| `account.refresh` | `basic_interval_sec`, `super_interval_sec`, `heavy_interval_sec`, `usage_concurrency`, `on_demand_min_interval_sec` |
-| `cache.local` | `image_max_mb`, `video_max_mb` |
-| `chat` | `timeout` |
-| `image` | `timeout`, `stream_timeout` |
-| `video` | `timeout` |
-| `voice` | `timeout` |
-| `asset` | `upload_timeout`, `download_timeout`, `list_timeout`, `delete_timeout` |
-| `nsfw` | `timeout` |
-| `batch` | `nsfw_concurrency`, `refresh_concurrency`, `asset_upload_concurrency`, `asset_list_concurrency`, `asset_delete_concurrency` |
-
-### 图片、视频格式
-
-| 配置项 | 可选值 |
-| :-- | :-- |
-| `features.image_format` | `grok_url`, `local_url`, `grok_md`, `local_md`, `base64` |
-| `features.imagine_public_image_proxy` | `true`, `false` |
-| `features.video_format` | `grok_url`, `local_url`, `grok_html`, `local_html` |
-
-<br>
-
-## 模型支持
-> 可通过 `GET /v1/models` 获取当前支持模型列表。
+可通过 `GET /v1/models` 查看当前可用模型。接口会按账号池过滤；没有 super 账号时不会返回 super+ 模型。
 
 ### Chat
 
-| 模型名 | mode | tier |
-| :-- | :-- | :-- |
-| `grok-4.20-0309-non-reasoning` | `fast` | `basic` |
-| `grok-4.20-0309` | `auto` | `super` |
-| `grok-4.20-0309-reasoning` | `expert` | `super` |
-| `grok-4.20-0309-non-reasoning-super` | `fast` | `super` |
-| `grok-4.20-0309-super` | `auto` | `super` |
-| `grok-4.20-0309-reasoning-super` | `expert` | `super` |
-| `grok-4.20-0309-non-reasoning-heavy` | `fast` | `heavy` |
-| `grok-4.20-0309-heavy` | `auto` | `heavy` |
-| `grok-4.20-0309-reasoning-heavy` | `expert` | `heavy` |
-| `grok-4.20-multi-agent-0309` | `heavy` | `heavy` |
-| `grok-4.20-fast` | `fast` | `basic`，优先使用高等级账号池 |
-| `grok-4.20-auto` | `auto` | `super`，优先使用高等级账号池 |
-| `grok-4.20-expert` | `expert` | `super`，优先使用高等级账号池 |
-| `grok-4.20-heavy` | `heavy` | `heavy` |
-| `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
-| `grok-4.3` | `console` | `basic`，console.x.ai 路由 |
-| `grok-4` | `console` | `basic`，console.x.ai 路由 |
-| `grok-4.20` | `console` | `basic`，console.x.ai 路由 |
-| `grok-4.20-reasoning` | `console` | `basic`，console.x.ai 路由 |
-| `grok-4.20-non-reasoning` | `console` | `basic`，console.x.ai 路由 |
-| `grok-4.20-multi-agent` | `console` | `basic`，console.x.ai 路由 |
-| `grok-build-0.1` | `console` | `basic`，console.x.ai 路由 |
+| 模型名 | 上游路径 | mode / model | 账号层级 |
+| :-- | :-- | :-- | :-- |
+| `grok-4.3-fast` | grok.com app-chat | `fast` | basic |
+| `grok-4.3-auto` | grok.com app-chat | `auto` | super+ |
+| `grok-4.3-expert` | grok.com app-chat | `expert` | super+ |
+| `grok-4.3-heavy` | grok.com app-chat | `heavy` | heavy |
+| `grok-4.3` | console.x.ai `/v1/responses` | `grok-4.3` | basic |
+| `grok-build-0.1` | console.x.ai `/v1/responses` | `grok-build-0.1` | basic |
+| `grok-4.20-0309-non-reasoning` | console.x.ai `/v1/responses` | 同名 | basic |
+| `grok-4.20-0309-reasoning` | console.x.ai `/v1/responses` | 同名 | basic |
+| `grok-4.20-multi-agent-0309` | console.x.ai `/v1/responses` | 同名 | basic |
 
-> `console` mode 使用 `console.x.ai/v1/responses`，与 grok.com SSO Cookie 兼容。该路径会自动启用 `web_search`，并使用独立的 Console 本地额度窗口。
+console.x.ai 说明：
+
+- 该路径使用 grok.com SSO Cookie，但限速来自 console.x.ai。
+- 不同 console 模型的请求参数会按上游兼容性自动处理。
+- 429 会按 console 模型独立冷却，不与 grok.com Chat 混算。
 
 ### Image
 
-| 模型名 | mode | tier |
-| :-- | :-- | :-- |
-| `grok-imagine-image-lite` | `fast` | `basic` |
-| `grok-imagine-image` | `auto` | `super` |
-| `grok-imagine-image-pro` | `auto` | `super` |
+| 模型名 | 上游路径 | 账号层级 | 备注 |
+| :-- | :-- | :-- | :-- |
+| `grok-imagine-image-lite` | grok.com app-chat | basic | 无精确画幅控制 |
+| `grok-imagine-image` | Imagine WebSocket | super+ | speed mode |
+| `grok-imagine-image-pro` | Imagine WebSocket | super+ | quality/pro mode |
 
 ### Image Edit
 
-| 模型名 | mode | tier |
+| 模型名 | 上游路径 | 账号层级 |
 | :-- | :-- | :-- |
-| `grok-imagine-image-edit` | `auto` | `super` |
+| `grok-imagine-image-edit` | grok.com app-chat edit flow | super+ |
 
 ### Video
 
-| 模型名 | mode | tier |
+| 模型名 | 上游路径 | 账号层级 |
 | :-- | :-- | :-- |
-| `grok-imagine-video` | `auto` | `super` |
+| `grok-imagine-video` | grok.com media API | super+ |
 
-<br>
+## API 示例
 
-## API 一览
+以下示例默认服务地址为 `http://localhost:8000`。
 
-| 接口 | 是否鉴权 | 说明 |
-| :-- | :-- | :-- |
-| `GET /v1/models` | 是 | 列出当前启用模型 |
-| `GET /v1/models/{model_id}` | 是 | 获取单个模型信息 |
-| `POST /v1/chat/completions` | 是 | 对话 / 图像 / 视频统一入口 |
-| `POST /v1/responses` | 是 | OpenAI Responses API 兼容子集 |
-| `POST /v1/messages` | 是 | Anthropic Messages API 兼容接口 |
-| `POST /v1/images/generations` | 是 | 独立图像生成接口 |
-| `POST /v1/images/edits` | 是 | 独立图像编辑接口 |
-| `POST /v1/videos` | 是 | 异步视频任务创建 |
-| `GET /v1/videos/{video_id}` | 是 | 查询视频任务 |
-| `GET /v1/videos/{video_id}/content` | 是 | 获取最终视频文件 |
-| `GET /v1/files/video?id=...` | 否 | 获取本地缓存视频 |
-| `GET /v1/files/image?id=...` | 否 | 获取本地缓存图片 |
-
-<br>
-
-## 接口示例
-
-> 以下示例默认使用 `http://localhost:8000` 地址。
-
-<details>
-<summary><code>GET /v1/models</code></summary>
-<br>
+### 列出模型
 
 ```bash
 curl http://localhost:8000/v1/models \
   -H "Authorization: Bearer $GROK2API_API_KEY"
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
-
-| 字段 | 位置 | 说明 |
-| :-- | :-- | :-- |
-| `Authorization` | Header | 当 `app.api_key` 非空时必填，格式为 `Bearer <api_key>` |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/chat/completions</code></summary>
-<br>
-
-对话：
+### Chat Completions
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
+    "model": "grok-4.3-auto",
     "stream": true,
-    "reasoning_effort": "high",
     "messages": [
-      {"role":"user","content":"你好"}
+      {"role": "user", "content": "用三句话解释量子隧穿"}
     ]
   }'
 ```
 
-图像：
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -d '{
-    "model": "grok-imagine-image",
-    "stream": true,
-    "messages": [
-      {"role":"user","content":"一只在太空漂浮的猫"}
-    ],
-    "image_config": {
-      "n": 2,
-      "size": "1024x1024",
-      "response_format": "url"
-    }
-  }'
-```
-
-视频：
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -d '{
-    "model": "grok-imagine-video",
-    "stream": true,
-    "messages": [
-      {"role":"user","content":"霓虹雨夜街头，电影感慢镜头追拍"}
-    ],
-    "video_config": {
-      "seconds": 10,
-      "size": "1792x1024",
-      "resolution_name": "720p",
-      "preset": "normal"
-    }
-  }'
-```
-
-<details>
-<summary>字段说明</summary>
-<br>
-
-| 字段 | 说明 |
-| :-- | :-- |
-| `messages` | 支持文本与多模态内容块 |
-| `stream` | 是否流式输出；不传时使用 `features.stream` 默认值 |
-| `reasoning_effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`；`none` 会关闭思考输出 |
-| `temperature` / `top_p` | 采样参数，默认 `0.8` / `0.95` |
-| `tools` | OpenAI function tools 结构 |
-| `tool_choice` | `auto`, `required` 或指定函数工具 |
-| `image_config` | 图像模型参数 |
-| \|_ `n` | `lite` 为 `1-4`，其他图像模型为 `1-10`，编辑模型为 `1-2` |
-| \|_ `size` | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
-| \|_ `response_format` | `url`, `b64_json` |
-| `video_config` | 视频模型参数 |
-| \|_ `seconds` | `6`, `10`, `12`, `16`, `20` |
-| \|_ `size` | `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
-| \|_ `resolution_name` | `480p`, `720p` |
-| \|_ `preset` | `fun`, `normal`, `spicy`, `custom` |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/responses</code></summary>
-<br>
+### Responses
 
 ```bash
 curl http://localhost:8000/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
-    "input": "解释一下量子隧穿",
-    "instructions": "用简洁的中文回答",
-    "stream": true,
-    "reasoning": {
-      "effort": "high"
-    }
+    "model": "grok-4.3",
+    "input": "搜索并总结今天的 AI 新闻",
+    "stream": true
   }'
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
-
-| 字段 | 说明 |
-| :-- | :-- |
-| `model` | 模型 ID，需为已启用模型 |
-| `input` | 用户输入；支持字符串或 Responses API 风格的消息数组 |
-| `instructions` | 可选系统指令，会作为 system 消息注入 |
-| `stream` | 是否流式输出；不传时使用 `features.stream` 默认值 |
-| `reasoning` | 可选思考配置 |
-| \|_ `effort` | `none` 会关闭思考输出；其他值会开启思考输出 |
-| `temperature` / `top_p` | 采样参数，默认 `0.8` / `0.95` |
-| `tools` / `tool_choice` | 支持函数工具；Responses API 的扁平工具格式会自动转换 |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/messages</code></summary>
-<br>
+### Anthropic Messages
 
 ```bash
 curl http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
+    "model": "grok-4.3-auto",
+    "max_tokens": 1024,
     "stream": true,
-    "thinking": {
-      "type": "enabled",
-      "budget_tokens": 1024
-    },
     "messages": [
-      {
-        "role": "user",
-        "content": "用三句话解释量子隧穿"
-      }
+      {"role": "user", "content": "写一个 FastAPI 健康检查示例"}
     ]
   }'
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
-
-| 字段 | 说明 |
-| :-- | :-- |
-| `model` | 模型 ID，需为已启用模型 |
-| `messages` | Anthropic Messages 格式消息，支持文本、图片、文档和工具结果块 |
-| `system` | 可选系统提示词，支持字符串或文本块数组 |
-| `stream` | 是否流式输出；不传时使用 `features.stream` 默认值 |
-| `thinking` | 可选思考配置 |
-| \|_ `type` | `disabled` 会关闭思考输出；其他配置会开启思考输出 |
-| `max_tokens` | 接收但当前会忽略，Grok 上游不暴露该参数 |
-| `tools` / `tool_choice` | 支持 Anthropic 工具格式，会转换为内部 function tools |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/images/generations</code></summary>
-<br>
+### Images
 
 ```bash
 curl http://localhost:8000/v1/images/generations \
@@ -539,34 +199,23 @@ curl http://localhost:8000/v1/images/generations \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
     "model": "grok-imagine-image",
-    "prompt": "一只在太空漂浮的猫",
+    "prompt": "一只在太空漂浮的猫，电影感",
     "n": 1,
-    "size": "1792x1024",
+    "size": "1024x1024",
     "response_format": "url"
   }'
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
+图像参数：
 
 | 字段 | 说明 |
 | :-- | :-- |
-| `model` | 图像模型：`grok-imagine-image-lite`, `grok-imagine-image`, `grok-imagine-image-pro` |
-| `prompt` | 图片生成提示词 |
-| `n` | 生成数量；`lite` 为 `1-4`，其他图像模型为 `1-10` |
-| `size` | 支持 `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
+| `model` | `grok-imagine-image-lite`、`grok-imagine-image`、`grok-imagine-image-pro` |
+| `n` | lite 为 `1-4`，其他图像模型为 `1-10` |
+| `size` | `1280x720`、`720x1280`、`1792x1024`、`1024x1792`、`1024x1024` |
 | `response_format` | `url` 或 `b64_json` |
 
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/images/edits</code></summary>
-<br>
+### Image Edit
 
 ```bash
 curl http://localhost:8000/v1/images/edits \
@@ -579,29 +228,7 @@ curl http://localhost:8000/v1/images/edits \
   -F "response_format=url"
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
-
-| 字段 | 说明 |
-| :-- | :-- |
-| `model` | 图像编辑模型，目前为 `grok-imagine-image-edit` |
-| `prompt` | 编辑指令 |
-| `image[]` | 参考图片，multipart 文件字段；最多使用 5 张 |
-| `n` | 生成数量，范围 `1-2` |
-| `size` | 当前仅支持 `1024x1024` |
-| `response_format` | `url` 或 `b64_json` |
-| `mask` | 暂不支持；传入会返回校验错误 |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/videos</code></summary>
-<br>
+### Videos
 
 ```bash
 curl http://localhost:8000/v1/videos \
@@ -611,9 +238,10 @@ curl http://localhost:8000/v1/videos \
   -F "seconds=10" \
   -F "size=1792x1024" \
   -F "resolution_name=720p" \
-  -F "preset=normal" \
-  -F "input_reference[]=@/path/to/reference.png"
+  -F "preset=normal"
 ```
+
+查询与下载：
 
 ```bash
 curl http://localhost:8000/v1/videos/<video_id> \
@@ -624,29 +252,71 @@ curl -L http://localhost:8000/v1/videos/<video_id>/content \
   -o result.mp4
 ```
 
-<details>
-<summary>字段说明</summary>
-<br>
+视频参数：
 
 | 字段 | 说明 |
 | :-- | :-- |
-| `model` | 视频模型，目前为 `grok-imagine-video` |
-| `prompt` | 视频生成提示词 |
-| `seconds` | 视频长度：`6`, `10`, `12`, `16`, `20` |
-| `size` | 支持 `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
+| `seconds` | `6`、`10`、`12`、`16`、`20` |
+| `size` | `720x1280`、`1280x720`、`1024x1024`、`1024x1792`、`1792x1024` |
 | `resolution_name` | `480p` 或 `720p` |
-| `preset` | `fun`, `normal`, `spicy`, `custom` |
-| `input_reference[]` | 可选图生视频参考图，multipart 文件字段；最多使用前 7 张 |
-| `video_id` | `POST /v1/videos` 返回的视频任务 ID，用于查询任务或下载成片 |
+| `preset` | `fun`、`normal`、`spicy`、`custom` |
+| `input_reference[]` | 可选图生视频参考图，最多使用前 7 张 |
 
-<br>
-</details>
+## 配置
 
-<br>
-</details>
+配置来源按优先级合并：
 
-<br>
+| 来源 | 说明 |
+| :-- | :-- |
+| 环境变量 | 启动时注入，支持 `GROK_` 前缀覆盖 |
+| `${DATA_DIR}/config.toml` | Admin 保存后的运行时配置 |
+| `config.defaults.toml` | 首次初始化模板 |
 
-## Star History
+常用环境变量：
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Chenyme/grok2api&type=Timeline)](https://star-history.com/#Chenyme/grok2api&Timeline)
+| 变量 | 默认值 | 说明 |
+| :-- | :-- | :-- |
+| `SERVER_HOST` | `0.0.0.0` | 监听地址 |
+| `SERVER_PORT` | `8000` | 监听端口 |
+| `DATA_DIR` | `./data` | 账号库、配置和本地媒体缓存目录 |
+| `LOG_DIR` | `./logs` | 日志目录 |
+| `ACCOUNT_STORAGE` | `local` | `local`、`redis`、`mysql`、`postgresql` |
+| `GROK_APP_API_KEY` | 空 | 覆盖 `app.api_key` |
+| `GROK_APP_APP_KEY` | `grok2api` | 覆盖 Admin 密码 |
+| `GROK_APP_APP_URL` | 空 | 外部访问地址 |
+
+关键配置分组：
+
+| 分组 | 关键项 |
+| :-- | :-- |
+| `app` | `app_key`、`app_url`、`api_key`、`webui_enabled`、`webui_key` |
+| `features` | `stream`、`thinking`、`memory`、`show_search_sources`、`image_format`、`video_format` |
+| `proxy.egress` | `mode`、`proxy_url`、`proxy_pool`、`resource_proxy_url`、`skip_ssl_verify` |
+| `proxy.clearance` | `mode`、`cf_cookies`、`user_agent`、`browser`、`flaresolverr_url` |
+| `account.refresh` | `enabled`、刷新间隔、并发、on-demand 最小间隔 |
+| `account.selection` | `max_inflight` |
+| `cache.local` | 图片/视频本地缓存上限 |
+
+图片和视频返回格式：
+
+| 配置项 | 可选值 |
+| :-- | :-- |
+| `features.image_format` | `grok_url`、`local_url`、`grok_md`、`local_md`、`base64` |
+| `features.video_format` | `grok_url`、`local_url`、`grok_html`、`local_html` |
+| `features.imagine_public_image_proxy` | `true` 时将 Imagine public 图下载到本地代理 |
+
+## 开发
+
+```bash
+uv run --frozen python -m unittest tests.test_release_smoke tests.test_console_reasoning_effort
+```
+
+常用检查：
+
+```bash
+uv run --frozen python -c 'from app.control.model.registry import list_enabled; print([m.model_name for m in list_enabled()])'
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -12,46 +12,26 @@ from .spec import ModelSpec
 MODELS: tuple[ModelSpec, ...] = (
     # === Chat ==============================================================
 
-    # Basic fast; auto/expert require Super+
-    ModelSpec("grok-4.20-0309-non-reasoning",           ModeId.FAST,     Tier.BASIC, Capability.CHAT,       True, "Grok 4.20 0309 Non-Reasoning"),
-    ModelSpec("grok-4.20-0309",                         ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309"),
-    ModelSpec("grok-4.20-0309-reasoning",               ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning"),
-    # Super+
-    ModelSpec("grok-4.20-0309-non-reasoning-super",     ModeId.FAST,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Non-Reasoning Super"),
-    ModelSpec("grok-4.20-0309-super",                   ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Super"),
-    ModelSpec("grok-4.20-0309-reasoning-super",         ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning Super"),
-    # Heavy+
-    ModelSpec("grok-4.20-0309-non-reasoning-heavy",     ModeId.FAST,     Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 0309 Non-Reasoning Heavy"),
-    ModelSpec("grok-4.20-0309-heavy",                   ModeId.AUTO,     Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 0309 Heavy"),
-    ModelSpec("grok-4.20-0309-reasoning-heavy",         ModeId.EXPERT,   Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 0309 Reasoning Heavy"),
-    ModelSpec("grok-4.20-multi-agent-0309",             ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 Multi-Agent 0309"),
-
-    # --- 硬优先级反向选池 (heavy → super → basic) ---
-    ModelSpec("grok-4.20-fast",                         ModeId.FAST,     Tier.BASIC, Capability.CHAT,       True, "Grok 4.20 Fast",          prefer_best=True),
-    ModelSpec("grok-4.20-auto",                         ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 Auto",          prefer_best=True),
-    ModelSpec("grok-4.20-expert",                       ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.20 Expert",        prefer_best=True),
-    ModelSpec("grok-4.20-heavy",                        ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.20 Heavy",         prefer_best=True),
-
-    # === grok-4.3 (grok-420-computer-use-sa) ==================================
-    # Super+（basic 池不支持此模式）
-    ModelSpec("grok-4.3-beta",                          ModeId.GROK_4_3, Tier.SUPER, Capability.CHAT,       True, "Grok 4.3 Beta"),
+    # grok.com web-chat modes. As of 2026-06-19 these are backed by Grok 4.3.
+    ModelSpec("grok-4.3-fast",                          ModeId.FAST,     Tier.BASIC, Capability.CHAT,       True, "Grok 4.3 Fast"),
+    ModelSpec("grok-4.3-auto",                          ModeId.AUTO,     Tier.SUPER, Capability.CHAT,       True, "Grok 4.3 Auto",          prefer_best=True),
+    ModelSpec("grok-4.3-expert",                        ModeId.EXPERT,   Tier.SUPER, Capability.CHAT,       True, "Grok 4.3 Expert",        prefer_best=True),
+    ModelSpec("grok-4.3-heavy",                         ModeId.HEAVY,    Tier.HEAVY, Capability.CHAT,       True, "Grok 4.3 Heavy",         prefer_best=True),
 
     # === Console API (console.x.ai/v1/responses) ============================
     # 通过 SSO cookie 直接调用 console.x.ai，basic 账号即可使用所有模型
     # 速率限制由 console.x.ai 控制（免费 tier: 1 rps / 60 RPM）
-    # Console effort support is model-specific. grok-4/grok-4.3 accept
-    # reasoning.effort; grok-4.20 rejects it with HTTP 400.
+    # Console effort support is model-specific. grok-4.3 accepts
+    # reasoning.effort; build and grok-4.20 variants reject it with HTTP 400.
     ModelSpec("grok-4.3",                               ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.3 (Console)",                    console_model="grok-4.3",                       default_reasoning_effort="high"),
-    ModelSpec("grok-4",                                 ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4 (Console)",                      console_model="grok-4",                         default_reasoning_effort="high"),
-    ModelSpec("grok-4.20",                              ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 (Console)",                   console_model="grok-4.20"),
+    ModelSpec("grok-build-0.1",                         ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok Build 0.1 (Console)",              console_model="grok-build-0.1"),
     # Fixed-intensity reasoning model — upstream rejects reasoning.effort.
-    ModelSpec("grok-4.20-reasoning",                    ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Reasoning (Console)",         console_model="grok-4.20-0309-reasoning"),
+    ModelSpec("grok-4.20-0309-reasoning",               ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 0309 Reasoning (Console)",    console_model="grok-4.20-0309-reasoning"),
     # Non-reasoning model — effort is not applicable.
-    ModelSpec("grok-4.20-non-reasoning",                ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Non-Reasoning (Console)",     console_model="grok-4.20-0309-non-reasoning"),
+    ModelSpec("grok-4.20-0309-non-reasoning",           ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 0309 Non-Reasoning (Console)", console_model="grok-4.20-0309-non-reasoning"),
     # Multi-agent — left default; effort behaviour with this variant has not
     # been verified, so we don't auto-inject "high" to avoid surprising 400s.
-    ModelSpec("grok-4.20-multi-agent",                  ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Multi-Agent (Console)",       console_model="grok-4.20-multi-agent-0309"),
-    ModelSpec("grok-build-0.1",                         ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok Build 0.1 (Console)",              console_model="grok-build-0.1"),
+    ModelSpec("grok-4.20-multi-agent-0309",             ModeId.CONSOLE, Tier.BASIC, Capability.CHAT,        True, "Grok 4.20 Multi-Agent 0309 (Console)",  console_model="grok-4.20-multi-agent-0309"),
 
     # === Image ==============================================================
 

@@ -1,132 +1,40 @@
-<img alt="Grok2API" src="https://github.com/user-attachments/assets/037a0a6e-7986-41cc-b4af-04df612ee886" />
+<h1 align="center">Grok2API</h1>
 
-[![Python](https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Version](https://img.shields.io/badge/version-2.0.8-111827)](../pyproject.toml)
-[![License](https://img.shields.io/badge/license-MIT-16a34a)](../LICENSE)
-[![中文](https://img.shields.io/badge/中文-2563EB?logo=bookstack&logoColor=white)](../README.md)
-[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chenyme/grok2api)
-[![Project%20Docs](https://img.shields.io/badge/Project%20Docs-0F766E?logo=readthedocs&logoColor=white)](https://blog.cheny.me/blog/posts/grok2api)
+<p align="center">
+  <strong>An OpenAI-compatible Grok gateway maintained for the current grok.com / console.x.ai behavior</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
+  <a href="../pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.9-111827"></a>
+  <a href="../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
+  <a href="../README.md"><img alt="Chinese" src="https://img.shields.io/badge/中文-2563EB?logo=bookstack&logoColor=white"></a>
+</p>
+
+> [!IMPORTANT]
+> The original upstream repository has been archived and is no longer maintained.
 
 > [!NOTE]
-> This project is for learning and research only. Please comply with Grok's terms of use and all applicable local laws and regulations. Do not use it for illegal purposes. If you fork the project or open a PR, please keep the original author and frontend attribution.
+> This project is for learning, research, and self-hosted gateway use. Follow xAI / Grok terms and local laws. Account cookies, Cloudflare clearance, and API keys are sensitive credentials.
 
-<br>
+## What This Is
 
-Grok2API is a **FastAPI**-based Grok gateway that exposes Grok Web capabilities through OpenAI-compatible APIs. Core features:
-- OpenAI-compatible endpoints: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/images/generations`, `/v1/images/edits`, `/v1/videos`, `/v1/videos/{video_id}`, `/v1/videos/{video_id}/content`
-- Anthropic-compatible endpoint: `/v1/messages`
-- Streaming and non-streaming chat, explicit reasoning output, function-tool structure passthrough, and unified token / usage accounting
-- Multi-account pools, tier-aware selection, failure feedback, quota synchronization, and automatic maintenance
-- console.x.ai `/v1/responses` routing for Console models and Web Search through the OpenAI / Anthropic compatible APIs
-- Local image/video caching and locally proxied media URLs
-- Text-to-image, image editing, text-to-video, and image-to-video support
-- Built-in Admin dashboard, Web Chat, Masonry image generation, and ChatKit voice page, with standalone Console quota display on the account page
+Grok2API wraps Grok Web, console.x.ai, Imagine, and media APIs behind OpenAI / Anthropic-compatible HTTP endpoints. It is built for self-hosted deployments that need account pools, unified auth, streaming output, image/video proxying, Admin management, and WebUI pages.
 
-<br>
+## Features
 
-## 2.0.8 Highlights
-
-> Major changes since `v2.0.4.rc4`.
-
-- Added console.x.ai routing: `grok-4.3`, `grok-4`, `grok-4.20`, `grok-4.20-reasoning`, `grok-4.20-non-reasoning`, `grok-4.20-multi-agent`, and `grok-build-0.1` now call `console.x.ai/v1/responses`; basic accounts can use these Console models.
-- Console routing supports streaming / non-streaming responses, image input, function tools, OpenAI Responses events, Anthropic Messages bridging, and automatic `web_search` tool injection.
-- `grok-4.3` and `grok-4` default to `reasoning_effort=high` when the caller omits it; `grok-4.20` omits `reasoning_effort` to avoid Console upstream `400` responses for unsupported parameters.
-- Search source handling was improved: Console single-model and multi-agent results collect both `web_search_call` sources and message annotations into `annotations` / `search_sources`; `features.show_search_sources` controls whether a Sources block is appended to text output.
-- Console quota is tracked independently through a local `console` quota window, defaulting to `30 / 15 minutes`. The Admin account page now shows a standalone Console balance card, row-level `C` quota pills, and source labels for real sync / local estimate / default values.
-- Invalid account handling now auto-disables known unusable credentials such as `invalid-credentials`, `bad-credentials`, missing sessions, revoked tokens, blocked users, and suspended accounts. The previous abnormal-account card/filter was removed, and historical abnormal / expired statuses are folded into disabled accounts.
-- console.x.ai `402` responses are treated as quota exhaustion so account selection can route around depleted Console credits.
-- The WebUI model dropdown is filtered by currently available account tiers to avoid selecting models with no matching account pool.
-- Current prebuilt image: `ghcr.io/piexian/grok2api:2.0.8`; `ghcr.io/piexian/grok2api:latest` points to the same image.
-
-<br>
-
-## Service Architecture
-
-```mermaid
-flowchart LR
-    Client["Clients\nOpenAI SDK / curl / Browser"] --> API["FastAPI App"]
-
-    subgraph Products["Products"]
-        direction TB
-        OpenAI["OpenAI APIs\n/v1/*"]
-        Anthropic["Anthropic APIs\n/v1/messages"]
-        Web["Web Products\n/admin /webui/*"]
-    end
-
-    subgraph Control["Control"]
-        direction TB
-        Models["Model Registry"]
-        Accounts["Account Services"]
-        Proxies["Proxy Services"]
-    end
-
-    subgraph Dataplane["Dataplane"]
-        direction TB
-        Reverse["Reverse Protocol + Transport"]
-        AccountDP["AccountDirectory"]
-        ProxyDP["Proxy Runtime"]
-    end
-
-    subgraph Platform["Platform"]
-        direction TB
-        Tokens["Token Estimation"]
-        Storage["Storage"]
-        Config["Config Snapshot"]
-        Auth["Auth"]
-        Log["Logging"]
-    end
-
-    API --> OpenAI
-    API --> Anthropic
-    API --> Web
-
-    OpenAI --> Models
-    OpenAI --> AccountDP
-    OpenAI --> ProxyDP
-    OpenAI --> Reverse
-    OpenAI --> Tokens
-    OpenAI --> Storage
-
-    Anthropic --> Models
-    Anthropic --> AccountDP
-    Anthropic --> ProxyDP
-    Anthropic --> Reverse
-    Anthropic --> Tokens
-
-    Web --> Accounts
-    Web --> Config
-    Web --> Auth
-
-    Accounts --> AccountDP
-    Proxies --> ProxyDP
-    Models --> Reverse
-```
-
-<br>
+- OpenAI-compatible APIs: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/images/generations`, `/v1/images/edits`, `/v1/videos`.
+- Anthropic-compatible API: `/v1/messages`.
+- Account pools: basic / lite / super / heavy, with local, Redis, MySQL, and PostgreSQL storage backends.
+- Quota and feedback: grok.com text modes use upstream quota; console.x.ai has independent runtime rate-limit parsing and cooldown.
+- Media: text-to-image, image editing, text-to-video, image-to-video, local image/video cache and proxy URLs.
+- Web products: Admin, Web Chat, Masonry image UI, and ChatKit voice UI.
+- Proxy and Cloudflare support: direct, single proxy, proxy pool, manual clearance, and FlareSolverr.
 
 ## Quick Start
 
-### Local Deployment
-
-```bash
-git clone https://github.com/chenyme/grok2api
-cd grok2api
-cp .env.example .env
-uv sync
-uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
-```
-
-### Docker Compose
-
-```bash
-git clone https://github.com/chenyme/grok2api
-cd grok2api
-cp .env.example .env
-docker compose up -d
-```
-
-### Prebuilt Image
+### Docker
 
 ```bash
 docker run -d \
@@ -138,30 +46,40 @@ docker run -d \
   ghcr.io/piexian/grok2api:latest
 ```
 
-| Image | Description |
+| Image | Notes |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to `2.0.8` |
-| `ghcr.io/piexian/grok2api:2.0.8` | Fixed version tag |
+| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to the 2.0.9 line |
+| `ghcr.io/piexian/grok2api:2.0.9` | Fixed version tag |
 
-### Vercel
+### Docker Compose
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/chenyme/grok2api&env=LOG_LEVEL,LOG_FILE_ENABLED,DATA_DIR,LOG_DIR,ACCOUNT_STORAGE,ACCOUNT_REDIS_URL,ACCOUNT_MYSQL_URL,ACCOUNT_POSTGRESQL_URL)
+```bash
+git clone https://github.com/piexian/grok2api
+cd grok2api
+cp .env.example .env
+docker compose up -d
+```
 
-### Render
+### Local
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chenyme/grok2api)
+```bash
+git clone https://github.com/piexian/grok2api
+cd grok2api
+cp .env.example .env
+uv sync
+uv run granian --interface asgi --host 0.0.0.0 --port 8000 --workers 1 app.main:app
+```
 
-### First Launch
+Minimum first-run settings:
 
-1. Change `app.app_key`
-2. Set `app.api_key`
-3. Set `app.app_url` otherwise image and video URLs may return `403 Forbidden`
+| Setting | Purpose |
+| :-- | :-- |
+| `app.api_key` | `/v1/*` API authentication |
+| `app.app_key` | Admin password |
+| `app.app_url` | Public base URL for local image/video proxy links |
+| `app.webui_enabled` / `app.webui_key` | WebUI switch and password |
 
-<br>
-
-## WebUI
-
-### Routes
+## Web Pages
 
 | Page | Path |
 | :-- | :-- |
@@ -171,366 +89,109 @@ docker run -d \
 | Cache management | `/admin/cache` |
 | WebUI login | `/webui/login` |
 | Web Chat | `/webui/chat` |
-| Masonry | `/webui/masonry` |
-| ChatKit | `/webui/chatkit` |
+| Masonry image UI | `/webui/masonry` |
+| ChatKit voice UI | `/webui/chatkit` |
 
-### Authentication Rules
+## Models
 
-| Scope | Config | Rule |
-| :-- | :-- | :-- |
-| `/v1/*` | `app.api_key` | No extra authentication when empty |
-| `/admin/*` | `app.app_key` | Default value: `grok2api` |
-| `/webui/*` | `app.webui_enabled`, `app.webui_key` | Disabled by default; if `webui_key` is empty, no extra verification is required |
-
-<br>
-
-## Configuration
-
-### Configuration Layers
-
-| Location | Purpose | Effective Time |
-| :-- | :-- | :-- |
-| `.env` | Pre-start configuration | At service startup |
-| `${DATA_DIR}/config.toml` | Runtime configuration | Effective immediately after save |
-| `config.defaults.toml` | Default template | On first initialization |
-
-
-
-### Environment Variables
-
-| Variable | Description | Default |
-| :-- | :-- | :-- |
-| `TZ` | Time zone | `Asia/Shanghai` |
-| `LOG_LEVEL` | Log level | `INFO` |
-| `LOG_FILE_ENABLED` | Write local log files | `true` |
-| `ACCOUNT_SYNC_INTERVAL` | Account directory incremental sync interval in seconds | `30` |
-| `ACCOUNT_SYNC_ACTIVE_INTERVAL` | Active sync interval after account-directory changes are detected, in seconds | `3` |
-| `SERVER_HOST` | Service bind address | `0.0.0.0` |
-| `SERVER_PORT` | Service port | `8000` |
-| `SERVER_WORKERS` | Granian worker count | `1` |
-| `HOST_PORT` | Docker Compose published host port | `8000` |
-| `DATA_DIR` | Local data root for accounts, locally cached media files, and cache indexes | `./data` |
-| `LOG_DIR` | Local log directory | `./logs` |
-| `ACCOUNT_STORAGE` | Account storage backend | `local` |
-| `ACCOUNT_LOCAL_PATH` | SQLite path for `local` account storage | `${DATA_DIR}/accounts.db` |
-| `ACCOUNT_REDIS_URL` | Redis DSN for `redis` mode | `""` |
-| `ACCOUNT_MYSQL_URL` | SQLAlchemy DSN for `mysql` mode | `""` |
-| `ACCOUNT_POSTGRESQL_URL` | SQLAlchemy DSN for `postgresql` mode | `""` |
-| `ACCOUNT_SQL_POOL_SIZE` | Core connection pool size for SQL backends | `5` |
-| `ACCOUNT_SQL_MAX_OVERFLOW` | Maximum overflow connections above pool size | `10` |
-| `ACCOUNT_SQL_POOL_TIMEOUT` | Seconds to wait for a free connection from the pool | `30` |
-| `ACCOUNT_SQL_POOL_RECYCLE` | Max connection lifetime in seconds before reconnect | `1800` |
-| `CONFIG_LOCAL_PATH` | Runtime config file path for `local` config storage | `${DATA_DIR}/config.toml` |
-
-Runtime config can also be overridden with `GROK_`-prefixed environment variables. For example, `GROK_APP_API_KEY` overrides `app.api_key`, and `GROK_FEATURES_STREAM` overrides `features.stream`.
-
-### System Configuration Groups
-
-| Group | Key Items |
-| :-- | :-- |
-| `app` | `app_key`, `app_url`, `api_key`, `webui_enabled`, `webui_key` |
-| `logging` | `file_level`, `max_files` |
-| `features` | `temporary`, `memory`, `stream`, `thinking`, `auto_chat_mode_fallback`, `thinking_summary`, `dynamic_statsig`, `enable_nsfw`, `show_search_sources`, `custom_instruction`, `image_format`, `imagine_public_image_proxy`, `video_format` |
-| `proxy.egress` | `mode`, `proxy_url`, `proxy_pool`, `resource_proxy_url`, `resource_proxy_pool`, `skip_ssl_verify` |
-| `proxy.clearance` | `mode`, `cf_cookies`, `user_agent`, `browser`, `flaresolverr_url`, `timeout_sec`, `refresh_interval` |
-| `retry` | `reset_session_status_codes`, `max_retries`, `on_codes` |
-| `account.refresh` | `basic_interval_sec`, `super_interval_sec`, `heavy_interval_sec`, `usage_concurrency`, `on_demand_min_interval_sec` |
-| `cache.local` | `image_max_mb`, `video_max_mb` |
-| `chat` | `timeout` |
-| `image` | `timeout`, `stream_timeout` |
-| `video` | `timeout` |
-| `voice` | `timeout` |
-| `asset` | `upload_timeout`, `download_timeout`, `list_timeout`, `delete_timeout` |
-| `nsfw` | `timeout` |
-| `batch` | `nsfw_concurrency`, `refresh_concurrency`, `asset_upload_concurrency`, `asset_list_concurrency`, `asset_delete_concurrency` |
-
-### Image and Video Formats
-
-| Config | Allowed Values |
-| :-- | :-- |
-| `features.image_format` | `grok_url`, `local_url`, `grok_md`, `local_md`, `base64` |
-| `features.imagine_public_image_proxy` | `true`, `false` |
-| `features.video_format` | `grok_url`, `local_url`, `grok_html`, `local_html` |
-
-<br>
-
-## Supported Models
-> You can use `GET /v1/models` to retrieve the currently supported model list.
+Use `GET /v1/models` to inspect models available to the currently configured account pools. Super-only models are hidden when no super account is available.
 
 ### Chat
 
-| Model | mode | tier |
-| :-- | :-- | :-- |
-| `grok-4.20-0309-non-reasoning` | `fast` | `basic` |
-| `grok-4.20-0309` | `auto` | `super` |
-| `grok-4.20-0309-reasoning` | `expert` | `super` |
-| `grok-4.20-0309-non-reasoning-super` | `fast` | `super` |
-| `grok-4.20-0309-super` | `auto` | `super` |
-| `grok-4.20-0309-reasoning-super` | `expert` | `super` |
-| `grok-4.20-0309-non-reasoning-heavy` | `fast` | `heavy` |
-| `grok-4.20-0309-heavy` | `auto` | `heavy` |
-| `grok-4.20-0309-reasoning-heavy` | `expert` | `heavy` |
-| `grok-4.20-multi-agent-0309` | `heavy` | `heavy` |
-| `grok-4.20-fast` | `fast` | `basic`, prefers higher-tier pools |
-| `grok-4.20-auto` | `auto` | `super`, prefers higher-tier pools |
-| `grok-4.20-expert` | `expert` | `super`, prefers higher-tier pools |
-| `grok-4.20-heavy` | `heavy` | `heavy` |
-| `grok-4.3-beta` | `grok-420-computer-use-sa` | `super` |
-| `grok-4.3` | `console` | `basic`, console.x.ai route |
-| `grok-4` | `console` | `basic`, console.x.ai route |
-| `grok-4.20` | `console` | `basic`, console.x.ai route |
-| `grok-4.20-reasoning` | `console` | `basic`, console.x.ai route |
-| `grok-4.20-non-reasoning` | `console` | `basic`, console.x.ai route |
-| `grok-4.20-multi-agent` | `console` | `basic`, console.x.ai route |
-| `grok-build-0.1` | `console` | `basic`, console.x.ai route |
+| Model | Upstream path | mode / model | Tier |
+| :-- | :-- | :-- | :-- |
+| `grok-4.3-fast` | grok.com app-chat | `fast` | basic |
+| `grok-4.3-auto` | grok.com app-chat | `auto` | super+ |
+| `grok-4.3-expert` | grok.com app-chat | `expert` | super+ |
+| `grok-4.3-heavy` | grok.com app-chat | `heavy` | heavy |
+| `grok-4.3` | console.x.ai `/v1/responses` | `grok-4.3` | basic |
+| `grok-build-0.1` | console.x.ai `/v1/responses` | `grok-build-0.1` | basic |
+| `grok-4.20-0309-non-reasoning` | console.x.ai `/v1/responses` | same | basic |
+| `grok-4.20-0309-reasoning` | console.x.ai `/v1/responses` | same | basic |
+| `grok-4.20-multi-agent-0309` | console.x.ai `/v1/responses` | same | basic |
 
-> `console` mode uses `console.x.ai/v1/responses` and accepts the same SSO cookies as grok.com. This path enables `web_search` automatically and uses a dedicated local Console quota window.
+Console notes:
+
+- console.x.ai uses Grok SSO cookies but has its own rate limits.
+- Request parameters are normalized per console model for upstream compatibility.
+- 429 responses are cooled down per console model, separately from grok.com Chat.
 
 ### Image
 
-| Model | mode | tier |
-| :-- | :-- | :-- |
-| `grok-imagine-image-lite` | `fast` | `basic` |
-| `grok-imagine-image` | `auto` | `super` |
-| `grok-imagine-image-pro` | `auto` | `super` |
+| Model | Upstream path | Tier | Notes |
+| :-- | :-- | :-- | :-- |
+| `grok-imagine-image-lite` | grok.com app-chat | basic | no precise aspect-ratio control |
+| `grok-imagine-image` | Imagine WebSocket | super+ | speed mode |
+| `grok-imagine-image-pro` | Imagine WebSocket | super+ | quality/pro mode |
 
 ### Image Edit
 
-| Model | mode | tier |
+| Model | Upstream path | Tier |
 | :-- | :-- | :-- |
-| `grok-imagine-image-edit` | `auto` | `super` |
+| `grok-imagine-image-edit` | grok.com app-chat edit flow | super+ |
 
 ### Video
 
-| Model | mode | tier |
+| Model | Upstream path | Tier |
 | :-- | :-- | :-- |
-| `grok-imagine-video` | `auto` | `super` |
-
-<br>
-
-## API Overview
-
-| Endpoint | Auth Required | Description |
-| :-- | :-- | :-- |
-| `GET /v1/models` | Yes | List currently enabled models |
-| `GET /v1/models/{model_id}` | Yes | Retrieve one model |
-| `POST /v1/chat/completions` | Yes | Unified entry point for chat, image, and video |
-| `POST /v1/responses` | Yes | OpenAI Responses API compatible subset |
-| `POST /v1/messages` | Yes | Anthropic Messages API compatible endpoint |
-| `POST /v1/images/generations` | Yes | Standalone image generation endpoint |
-| `POST /v1/images/edits` | Yes | Standalone image editing endpoint |
-| `POST /v1/videos` | Yes | Asynchronous video job creation |
-| `GET /v1/videos/{video_id}` | Yes | Retrieve a video job |
-| `GET /v1/videos/{video_id}/content` | Yes | Fetch the final video file |
-| `GET /v1/files/video?id=...` | No | Fetch a locally cached video |
-| `GET /v1/files/image?id=...` | No | Fetch a locally cached image |
-
-<br>
+| `grok-imagine-video` | grok.com media API | super+ |
 
 ## API Examples
 
-> The examples below use `http://localhost:8000`.
+The examples use `http://localhost:8000`.
 
-<details>
-<summary><code>GET /v1/models</code></summary>
-<br>
+### List Models
 
 ```bash
 curl http://localhost:8000/v1/models \
   -H "Authorization: Bearer $GROK2API_API_KEY"
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
-
-| Field | Location | Description |
-| :-- | :-- | :-- |
-| `Authorization` | Header | Required when `app.api_key` is non-empty. Use `Bearer <api_key>` |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/chat/completions</code></summary>
-<br>
-
-Chat:
+### Chat Completions
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
+    "model": "grok-4.3-auto",
     "stream": true,
-    "reasoning_effort": "high",
     "messages": [
-      {"role":"user","content":"Hello"}
+      {"role": "user", "content": "Explain quantum tunneling in three sentences"}
     ]
   }'
 ```
 
-Image:
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -d '{
-    "model": "grok-imagine-image",
-    "stream": true,
-    "messages": [
-      {"role":"user","content":"A cat floating in space"}
-    ],
-    "image_config": {
-      "n": 2,
-      "size": "1024x1024",
-      "response_format": "url"
-    }
-  }'
-```
-
-Video:
-
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -d '{
-    "model": "grok-imagine-video",
-    "stream": true,
-    "messages": [
-      {"role":"user","content":"A neon rainy street at night, cinematic slow tracking shot"}
-    ],
-    "video_config": {
-      "seconds": 10,
-      "size": "1792x1024",
-      "resolution_name": "720p",
-      "preset": "normal"
-    }
-  }'
-```
-
-<details>
-<summary>Field Notes</summary>
-<br>
-
-| Field | Description |
-| :-- | :-- |
-| `messages` | Supports text and multimodal content blocks |
-| `stream` | Whether to stream output; falls back to `features.stream` when omitted |
-| `reasoning_effort` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`; `none` disables reasoning output |
-| `temperature` / `top_p` | Sampling parameters, default `0.8` / `0.95` |
-| `tools` | OpenAI function tools structure |
-| `tool_choice` | `auto`, `required`, or a specific function tool |
-| `image_config` | Image model parameters |
-| \|_ `n` | `1-4` for `lite`, `1-10` for other image models, `1-2` for edit |
-| \|_ `size` | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
-| \|_ `response_format` | `url`, `b64_json` |
-| `video_config` | Video model parameters |
-| \|_ `seconds` | `6`, `10`, `12`, `16`, `20` |
-| \|_ `size` | `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
-| \|_ `resolution_name` | `480p`, `720p` |
-| \|_ `preset` | `fun`, `normal`, `spicy`, `custom` |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/responses</code></summary>
-<br>
+### Responses
 
 ```bash
 curl http://localhost:8000/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
-    "input": "Explain quantum tunneling",
-    "instructions": "Keep the answer concise.",
-    "stream": true,
-    "reasoning": {
-      "effort": "high"
-    }
+    "model": "grok-4.3",
+    "input": "Search and summarize today's AI news",
+    "stream": true
   }'
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
-
-| Field | Description |
-| :-- | :-- |
-| `model` | Model ID. It must be an enabled model |
-| `input` | User input; supports a string or a Responses API-style message array |
-| `instructions` | Optional system instructions injected as a system message |
-| `stream` | Whether to stream output; falls back to `features.stream` when omitted |
-| `reasoning` | Optional reasoning configuration |
-| \|_ `effort` | `none` disables reasoning output; other values enable it |
-| `temperature` / `top_p` | Sampling parameters, default `0.8` / `0.95` |
-| `tools` / `tool_choice` | Function tools are supported; flat Responses API tool definitions are normalized automatically |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/messages</code></summary>
-<br>
+### Anthropic Messages
 
 ```bash
 curl http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-4.20-auto",
+    "model": "grok-4.3-auto",
+    "max_tokens": 1024,
     "stream": true,
-    "thinking": {
-      "type": "enabled",
-      "budget_tokens": 1024
-    },
     "messages": [
-      {
-        "role": "user",
-        "content": "Explain quantum tunneling in three sentences"
-      }
+      {"role": "user", "content": "Write a FastAPI health-check example"}
     ]
   }'
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
-
-| Field | Description |
-| :-- | :-- |
-| `model` | Model ID. It must be an enabled model |
-| `messages` | Anthropic Messages-format messages; supports text, image, document, and tool-result blocks |
-| `system` | Optional system prompt; accepts a string or an array of text blocks |
-| `stream` | Whether to stream output; falls back to `features.stream` when omitted |
-| `thinking` | Optional reasoning configuration |
-| \|_ `type` | `disabled` disables reasoning output; other configs enable it |
-| `max_tokens` | Accepted but currently ignored because Grok upstream does not expose this parameter |
-| `tools` / `tool_choice` | Anthropic tool definitions are supported and converted to internal function tools |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/images/generations</code></summary>
-<br>
+### Images
 
 ```bash
 curl http://localhost:8000/v1/images/generations \
@@ -538,34 +199,23 @@ curl http://localhost:8000/v1/images/generations \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
     "model": "grok-imagine-image",
-    "prompt": "A cat floating in space",
+    "prompt": "A cat floating in space, cinematic",
     "n": 1,
-    "size": "1792x1024",
+    "size": "1024x1024",
     "response_format": "url"
   }'
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
+Image parameters:
 
 | Field | Description |
 | :-- | :-- |
-| `model` | Image model: `grok-imagine-image-lite`, `grok-imagine-image`, or `grok-imagine-image-pro` |
-| `prompt` | Image generation prompt |
-| `n` | Number of images; `1-4` for `lite`, `1-10` for other image models |
-| `size` | Supports `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
+| `model` | `grok-imagine-image-lite`, `grok-imagine-image`, or `grok-imagine-image-pro` |
+| `n` | `1-4` for lite, `1-10` for other image models |
+| `size` | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
 | `response_format` | `url` or `b64_json` |
 
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/images/edits</code></summary>
-<br>
+### Image Edit
 
 ```bash
 curl http://localhost:8000/v1/images/edits \
@@ -578,29 +228,7 @@ curl http://localhost:8000/v1/images/edits \
   -F "response_format=url"
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
-
-| Field | Description |
-| :-- | :-- |
-| `model` | Image-edit model, currently `grok-imagine-image-edit` |
-| `prompt` | Edit instruction |
-| `image[]` | Reference image multipart file field; up to 5 images are used |
-| `n` | Number of outputs, range `1-2` |
-| `size` | Currently only `1024x1024` is supported |
-| `response_format` | `url` or `b64_json` |
-| `mask` | Not supported yet; passing it returns a validation error |
-
-<br>
-</details>
-
-<br>
-</details>
-
-<details>
-<summary><code>POST /v1/videos</code></summary>
-<br>
+### Videos
 
 ```bash
 curl http://localhost:8000/v1/videos \
@@ -610,9 +238,10 @@ curl http://localhost:8000/v1/videos \
   -F "seconds=10" \
   -F "size=1792x1024" \
   -F "resolution_name=720p" \
-  -F "preset=normal" \
-  -F "input_reference[]=@/path/to/reference.png"
+  -F "preset=normal"
 ```
+
+Query and download:
 
 ```bash
 curl http://localhost:8000/v1/videos/<video_id> \
@@ -623,29 +252,71 @@ curl -L http://localhost:8000/v1/videos/<video_id>/content \
   -o result.mp4
 ```
 
-<details>
-<summary>Field Notes</summary>
-<br>
+Video parameters:
 
 | Field | Description |
 | :-- | :-- |
-| `model` | Video model, currently `grok-imagine-video` |
-| `prompt` | Video generation prompt |
-| `seconds` | Video length: `6`, `10`, `12`, `16`, `20` |
-| `size` | Supports `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
+| `seconds` | `6`, `10`, `12`, `16`, `20` |
+| `size` | `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
 | `resolution_name` | `480p` or `720p` |
 | `preset` | `fun`, `normal`, `spicy`, `custom` |
-| `input_reference[]` | Optional image-to-video reference multipart file field; at most the first 7 images are used |
-| `video_id` | Video job ID returned by `POST /v1/videos`; used to retrieve the job or download the final video |
+| `input_reference[]` | Optional image-to-video reference images; only the first 7 are used |
 
-<br>
-</details>
+## Configuration
 
-<br>
-</details>
+Config sources are merged in this order:
 
-<br>
+| Source | Notes |
+| :-- | :-- |
+| Environment variables | Startup overrides; supports `GROK_` prefix |
+| `${DATA_DIR}/config.toml` | Runtime config saved by Admin |
+| `config.defaults.toml` | First-run defaults |
 
-## Star History
+Common environment variables:
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Chenyme/grok2api&type=Timeline)](https://star-history.com/#Chenyme/grok2api&Timeline)
+| Variable | Default | Description |
+| :-- | :-- | :-- |
+| `SERVER_HOST` | `0.0.0.0` | Bind host |
+| `SERVER_PORT` | `8000` | Bind port |
+| `DATA_DIR` | `./data` | Account DB, config, and local media cache |
+| `LOG_DIR` | `./logs` | Log directory |
+| `ACCOUNT_STORAGE` | `local` | `local`, `redis`, `mysql`, or `postgresql` |
+| `GROK_APP_API_KEY` | empty | Overrides `app.api_key` |
+| `GROK_APP_APP_KEY` | `grok2api` | Overrides Admin password |
+| `GROK_APP_APP_URL` | empty | Public app URL |
+
+Important config groups:
+
+| Group | Keys |
+| :-- | :-- |
+| `app` | `app_key`, `app_url`, `api_key`, `webui_enabled`, `webui_key` |
+| `features` | `stream`, `thinking`, `memory`, `show_search_sources`, `image_format`, `video_format` |
+| `proxy.egress` | `mode`, `proxy_url`, `proxy_pool`, `resource_proxy_url`, `skip_ssl_verify` |
+| `proxy.clearance` | `mode`, `cf_cookies`, `user_agent`, `browser`, `flaresolverr_url` |
+| `account.refresh` | `enabled`, refresh intervals, concurrency, on-demand interval |
+| `account.selection` | `max_inflight` |
+| `cache.local` | image/video cache limits |
+
+Media output formats:
+
+| Setting | Values |
+| :-- | :-- |
+| `features.image_format` | `grok_url`, `local_url`, `grok_md`, `local_md`, `base64` |
+| `features.video_format` | `grok_url`, `local_url`, `grok_html`, `local_html` |
+| `features.imagine_public_image_proxy` | If `true`, Imagine public images are downloaded and returned through local proxy URLs |
+
+## Development
+
+```bash
+uv run --frozen python -m unittest tests.test_release_smoke tests.test_console_reasoning_effort
+```
+
+Model registry check:
+
+```bash
+uv run --frozen python -c 'from app.control.model.registry import list_enabled; print([m.model_name for m in list_enabled()])'
+```
+
+## License
+
+MIT. See [LICENSE](../LICENSE).

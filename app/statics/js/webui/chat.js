@@ -2,7 +2,7 @@
   const VERIFY_ENDPOINT = '/webui/api/verify';
   const MODELS_ENDPOINT = '/webui/api/models';
   const CHAT_ENDPOINT = '/webui/api/chat/completions';
-  const PREFERRED_MODEL = 'grok-4.20-0309-non-reasoning';
+  const PREFERRED_MODEL = 'grok-4.3-fast';
   const STORE_KEY = 'grok2api_webui_chat_sessions_v1';
   const SIDEBAR_STORE_KEY = 'grok2api_webui_sidebar_collapsed_v1';
 

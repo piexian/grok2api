@@ -361,6 +361,7 @@ async def _chat_stream_to_anthropic_sse(
                 },
             },
         })
+    yield ": heartbeat\n\n"
 
     text_block_open = False
     text_block_index = -1
@@ -630,6 +631,7 @@ async def create(
                     yield _sse("ping", {"type": "ping"})
 
                     ended = False
+                    yield ": heartbeat\n\n"
                     async for line in _stream_chat(
                             token=token,
                             mode_id=ModeId(selected_mode_id),

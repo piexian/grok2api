@@ -94,6 +94,7 @@ def select_any(
     exclude_idxs: frozenset[int] | None = None,
     prefer_tag_idxs: set[int] | None    = None,
     now_s: int,
+    ignore_cooling: bool = False,
 ) -> int | None:
     """Select any active account in ``pool_id`` irrespective of per-mode quota.
 
@@ -111,6 +112,7 @@ def select_any(
         exclude_idxs=exclude_idxs,
         prefer_tag_idxs=prefer_tag_idxs,
         now_s=now_s,
+        ignore_cooling=ignore_cooling,
     )
 
 
@@ -295,6 +297,7 @@ def _random_select(
     exclude_idxs: frozenset[int] | None,
     prefer_tag_idxs: set[int] | None,
     now_s: int,
+    ignore_cooling: bool = False,
 ) -> int | None:
     candidates: set[int] = _pool_union(table, pool_id)
     if not candidates:
@@ -309,7 +312,7 @@ def _random_select(
         working -= exclude_idxs
     working = {
         idx for idx in working
-        if int(cooling_col[idx]) <= now_s
+        if (ignore_cooling or int(cooling_col[idx]) <= now_s)
         and int(inflight_col[idx]) < max_inflight
     }
     if not working:

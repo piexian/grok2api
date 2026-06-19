@@ -38,6 +38,7 @@ Response output items (non-streaming):
   - {"type": "function_call", "call_id": "...", "name": "...", "arguments": "..."}
 """
 
+import re
 from typing import Any
 
 import orjson
@@ -367,9 +368,10 @@ _REASONING_EFFORT_UNSUPPORTED_MODELS = {
     # Upstream rejects `reasoning.effort`/`reasoningEffort` for these Console
     # model ids with HTTP 400. Keep this at the protocol layer so every caller
     # path avoids the unsupported field, including explicit client defaults.
-    "grok-4.20",
     "grok-4.20-0309-reasoning",
     "grok-4.20-0309-non-reasoning",
+    "grok-4.20-multi-agent-0309",
+    "grok-build-0.1",
 }
 
 
@@ -547,12 +549,12 @@ def extract_console_search_sources(response_json: dict[str, Any], ) -> list[dict
 
     Two upstream variants are handled:
 
-    1. Single-agent models (grok-4.3, grok-4.20-reasoning) emit a
+    1. Single-agent models (grok-4.3, grok-4.20-0309-reasoning) emit a
        ``web_search_call`` output item per search with full sources:
          ``{"type": "search", "sources": [{"url": "..."}, ...]}``
        or ``{"type": "open_page", "url": "..."}``.
 
-    2. Multi-agent models (grok-4.20-multi-agent) skip ``web_search_call``
+    2. Multi-agent models (grok-4.20-multi-agent-0309) skip ``web_search_call``
        items entirely and embed URLs only as document-level annotations on
        the final assistant message with ``start_index == end_index == 0``.
        We fall back to those annotation URLs so callers always see a
@@ -704,20 +706,80 @@ def extract_console_usage(response_json: dict[str, Any]) -> dict[str, int]:
     }
 
 
+_CONSOLE_LIMIT_RE = re.compile(
+    r"(Requests|Tokens) per (Second|Minute).*?\(actual/limit\):\s*(\d+)\s*/\s*(\d+)"
+)
+_CONSOLE_TEAM_MODEL_RE = re.compile(
+    r"team ([0-9a-f-]{36}) and model ([^ .]+)", re.IGNORECASE
+)
+_CONSOLE_RESET_RE = re.compile(r"Resets in:\s*([0-9dhms ]+)", re.IGNORECASE)
+
+
+def _parse_reset_seconds(value: str) -> int | None:
+    total = 0
+    for amount, unit in re.findall(r"(\d+)\s*([dhms])", value.lower()):
+        n = int(amount)
+        if unit == "d":
+            total += n * 86_400
+        elif unit == "h":
+            total += n * 3_600
+        elif unit == "m":
+            total += n * 60
+        else:
+            total += n
+    return total or None
+
+
+def _console_error_details(message: str, code: str = "") -> dict[str, Any]:
+    tm = _CONSOLE_TEAM_MODEL_RE.search(message)
+    reset_match = _CONSOLE_RESET_RE.search(message)
+    lower = message.lower()
+    return {
+        "code": code,
+        "team": tm.group(1) if tm else "",
+        "model": tm.group(2) if tm else "",
+        "limits": [
+            {
+                "kind": m.group(1).lower(),
+                "window": m.group(2).lower(),
+                "actual": int(m.group(3)),
+                "limit": int(m.group(4)),
+            }
+            for m in _CONSOLE_LIMIT_RE.finditer(message)
+        ],
+        "reset_seconds": (
+            _parse_reset_seconds(reset_match.group(1)) if reset_match else None
+        ),
+        "free_limit": (
+            "free usage limit" in lower
+            or "purchase credits" in lower
+            or "usage limit reached" in lower
+        ),
+    }
+
+
 def parse_console_error(status_code: int, body: str) -> UpstreamError:
     """Convert a non-200 console response into an UpstreamError."""
     message = f"Console upstream returned {status_code}"
+    code = ""
+    details: dict[str, Any] = {}
     try:
         obj = orjson.loads(body) if body else {}
         if isinstance(obj, dict):
+            code = str(obj.get("code") or "")
             err = obj.get("error") or obj.get("code") or ""
             if isinstance(err, dict):
                 err = err.get("message") or err.get("code") or ""
             if err:
+                err = str(err)
                 message = f"{message}: {err}"
+                details = _console_error_details(err, code)
     except (orjson.JSONDecodeError, ValueError, TypeError):
         pass
-    return UpstreamError(message, status=status_code, body=body[:400])
+    exc = UpstreamError(message, status=status_code, body=body[:400])
+    if details:
+        exc.details["console"] = details
+    return exc
 
 
 # ---------------------------------------------------------------------------

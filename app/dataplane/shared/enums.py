@@ -12,7 +12,7 @@ class ModeId(IntEnum):
     FAST = 1
     EXPERT = 2
     HEAVY = 3
-    GROK_4_3 = 4
+    GROK_4_3 = 4  # legacy quota slot; no current public model maps here
     CONSOLE = 5
 
 
@@ -53,7 +53,6 @@ ALL_MODE_IDS: tuple[int, ...] = (
     int(ModeId.FAST),
     int(ModeId.EXPERT),
     int(ModeId.HEAVY),
-    int(ModeId.GROK_4_3),
     int(ModeId.CONSOLE),
 )
 

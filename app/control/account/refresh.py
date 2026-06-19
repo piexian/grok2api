@@ -58,7 +58,7 @@ _MODE_KEYS = {
     4: "quota_grok_4_3",
     5: "quota_console",
 }
-_UPSTREAM_QUOTA_MODE_IDS = (0, 1, 2, 3, 4)
+_UPSTREAM_QUOTA_MODE_IDS = (0, 1, 2, 3)
 _POOL_DETECTION_MODE_IDS = (0,)
 _REFRESH_POOL_PRIORITY = {"heavy": 0, "super": 1, "lite": 2, "basic": 3}
 _REFRESH_RECORD_BATCH_SIZE = 1000
@@ -138,8 +138,8 @@ class AccountRefreshService:
 
         Examples:
           - basic -> auto / fast / heavy probe
-          - super -> auto / fast / expert / heavy probe / grok_4_3
-          - heavy -> auto / fast / expert / heavy / grok_4_3
+          - super -> auto / fast / expert / heavy probe
+          - heavy -> auto / fast / expert / heavy
         """
         try:
             from app.dataplane.reverse.protocol.xai_usage import fetch_all_quotas
@@ -287,9 +287,7 @@ class AccountRefreshService:
         if record is None or record.is_deleted():
             return
         if mode_id == 5:
-            await self._apply_single_mode(
-                record, mode_id, window=None, is_use=True, use_at_ms=now_ms()
-            )
+            await self.record_success_async(token)
             return
         try:
             window = await self._fetch_mode_quota(token, record.pool, mode_id)
@@ -299,6 +297,20 @@ class AccountRefreshService:
             raise
         await self._apply_single_mode(
             record, mode_id, window, is_use=True, use_at_ms=now_ms()
+        )
+
+    async def record_success_async(self, token: str) -> None:
+        """Persist use counters without touching upstream quota windows."""
+        from .commands import AccountPatch
+
+        await self._repo.patch_accounts(
+            [
+                AccountPatch(
+                    token=token,
+                    usage_use_delta=1,
+                    last_use_at=now_ms(),
+                )
+            ]
         )
 
     async def refresh_scheduled(
@@ -546,6 +558,7 @@ class AccountRefreshService:
                 if (
                     record is not None
                     and getattr(exc, "status", None) == 429
+                    and mode_id != 5
                     and mode_id in _MODE_KEYS
                 ):
                     now = now_ms()

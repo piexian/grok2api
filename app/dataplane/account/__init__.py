@@ -158,6 +158,7 @@ class AccountDirectory:
         exclude_tokens: list[str] | None = None,
         prefer_tags: list[str] | None = None,
         now_s_override: int | None = None,
+        console_model: str | None = None,
     ) -> AccountLease | None:
         """Select any active account from pool_candidates without mode quota checking.
 
@@ -181,6 +182,15 @@ class AccountDirectory:
             if idxs:
                 exclude_idxs = frozenset(idxs)
 
+        if console_model:
+            if table.is_console_model_cooling(console_model, ts):
+                return None
+            blocked = table.console_blocked_indices(console_model, ts)
+            if blocked:
+                exclude_idxs = frozenset(
+                    blocked if exclude_idxs is None else set(exclude_idxs) | blocked
+                )
+
         prefer_tag_idxs: set[int] | None = None
         if prefer_tags:
             sets = [
@@ -198,6 +208,7 @@ class AccountDirectory:
                     exclude_idxs=exclude_idxs,
                     prefer_tag_idxs=prefer_tag_idxs,
                     now_s=ts,
+                    ignore_cooling=bool(console_model),
                 )
                 if idx is not None:
                     break
@@ -239,6 +250,8 @@ class AccountDirectory:
         remaining: int | None = None,
         reset_at_ms: int | None = None,
         now_s_val: int | None = None,
+        console_model: str | None = None,
+        upstream_error: BaseException | None = None,
     ) -> None:
         """Apply upstream response feedback to the account slot."""
         table = self._table
@@ -255,12 +268,27 @@ class AccountDirectory:
         increment_global_success = False
 
         async with self._lock:
-            if kind == FeedbackKind.SUCCESS:
+            if console_model and kind == FeedbackKind.SUCCESS:
+                fb.apply_success_random(table, idx)
+                increment_global_success = True
+
+            elif kind == FeedbackKind.SUCCESS:
                 if strategy == "random":
                     fb.apply_success_random(table, idx)
                 else:
                     fb.apply_success_quota(table, idx, mode_id)
                 increment_global_success = True
+
+            elif console_model and kind == FeedbackKind.RATE_LIMITED:
+                cooldown_sec, team_scoped = _console_cooling_sec(upstream_error)
+                table.apply_console_model_cooldown(
+                    idx,
+                    console_model,
+                    ts + cooldown_sec,
+                    team_scoped=team_scoped,
+                )
+                fb.apply_rate_limited_console(table, idx)
+                fb.update_last_fail(table, idx, ts)
 
             elif kind == FeedbackKind.RATE_LIMITED:
                 if strategy == "random":
@@ -375,6 +403,40 @@ def _pool_cooling_sec(pool_id: int) -> int:
         pool_str, _POOL_INTERVAL_CONFIG["basic"]
     )
     return max(0, int(get_config(interval_key, default_interval)))
+
+
+def _console_cooling_sec(exc: BaseException | None) -> tuple[int, bool]:
+    """Return (cooldown seconds, team scoped) for a console.x.ai limit error."""
+    details = getattr(exc, "details", {}) if exc is not None else {}
+    console = details.get("console") if isinstance(details, dict) else None
+    if not isinstance(console, dict):
+        return 65, False
+
+    reset_seconds = console.get("reset_seconds")
+    if isinstance(reset_seconds, int) and reset_seconds > 0:
+        return max(1, reset_seconds), bool(console.get("team"))
+
+    if console.get("free_limit"):
+        return 3_600, bool(console.get("team"))
+
+    cooldown = 0
+    for limit in console.get("limits") or []:
+        if not isinstance(limit, dict):
+            continue
+        window = str(limit.get("window") or "").lower()
+        kind = str(limit.get("kind") or "").lower()
+        actual = int(limit.get("actual") or 0)
+        max_limit = int(limit.get("limit") or 0)
+        if max_limit > 0 and actual < max_limit:
+            continue
+        if window == "second":
+            cooldown = max(cooldown, 2)
+        elif window == "minute":
+            cooldown = max(cooldown, 65)
+        elif kind == "tokens":
+            cooldown = max(cooldown, 65)
+
+    return (cooldown or 65), bool(console.get("team"))
 
 
 # ---------------------------------------------------------------------------

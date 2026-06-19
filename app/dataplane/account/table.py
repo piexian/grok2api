@@ -170,6 +170,14 @@ class AccountRuntimeTable:
         default_factory=lambda: array.array("L")
     )
 
+    # --- Console endpoint rate limit buckets (runtime only) ---
+    # console.x.ai reports team/model buckets. These are deliberately kept
+    # separate from grok.com mode quota columns.
+    console_model_cooling_until_s: dict[str, int] = field(default_factory=dict)
+    console_account_model_cooling_until_s: dict[tuple[int, str], int] = field(
+        default_factory=dict
+    )
+
     # --- Pre-computed selection indexes ---
     # (pool_id, mode_id) → set of idx with a supported quota window and status == ACTIVE
     mode_available: dict[tuple[int, int], set[int]] = field(default_factory=dict)
@@ -433,6 +441,47 @@ class AccountRuntimeTable:
 
     def is_active(self, idx: int) -> bool:
         return int(self.status_by_idx[idx]) == int(StatusId.ACTIVE)
+
+    def is_console_model_cooling(self, console_model: str, now_s: int) -> bool:
+        until = int(self.console_model_cooling_until_s.get(console_model, 0))
+        if until <= now_s:
+            self.console_model_cooling_until_s.pop(console_model, None)
+            return False
+        return True
+
+    def console_blocked_indices(self, console_model: str, now_s: int) -> set[int]:
+        blocked: set[int] = set()
+        expired: list[tuple[int, str]] = []
+        for key, until in self.console_account_model_cooling_until_s.items():
+            if until <= now_s:
+                expired.append(key)
+                continue
+            idx, model = key
+            if model == console_model:
+                blocked.add(idx)
+        for key in expired:
+            self.console_account_model_cooling_until_s.pop(key, None)
+        return blocked
+
+    def apply_console_model_cooldown(
+        self,
+        idx: int,
+        console_model: str,
+        until_s: int,
+        *,
+        team_scoped: bool,
+    ) -> None:
+        if team_scoped:
+            self.console_model_cooling_until_s[console_model] = max(
+                int(self.console_model_cooling_until_s.get(console_model, 0)),
+                until_s,
+            )
+            return
+        key = (idx, console_model)
+        self.console_account_model_cooling_until_s[key] = max(
+            int(self.console_account_model_cooling_until_s.get(key, 0)),
+            until_s,
+        )
 
     def iter_live_indices(self) -> Iterator[int]:
         for idx in range(len(self.token_by_idx)):

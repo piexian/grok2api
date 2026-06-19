@@ -68,6 +68,11 @@ def apply_rate_limited_random(
     _adjust_health(table, idx, _RATE_LIMIT_FACTOR)
 
 
+def apply_rate_limited_console(table: AccountRuntimeTable, idx: int) -> None:
+    """Console endpoint: reduce health without touching grok.com cooldown/quota."""
+    _adjust_health(table, idx, _RATE_LIMIT_FACTOR)
+
+
 # ---------------------------------------------------------------------------
 # Strategy-agnostic feedback helpers (shared)
 # ---------------------------------------------------------------------------
@@ -174,6 +179,7 @@ __all__ = [
     "apply_success_random",
     "apply_rate_limited_quota",
     "apply_rate_limited_random",
+    "apply_rate_limited_console",
     "apply_auth_failure",
     "apply_forbidden",
     "apply_server_error",

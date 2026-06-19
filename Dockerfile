@@ -15,7 +15,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.6 /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./
 
-RUN UV_HTTP_TIMEOUT=120 uv sync --frozen --no-build --no-dev --no-install-project \
+ARG UV_HTTP_TIMEOUT=600
+RUN UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT} uv sync --frozen --no-build --no-dev --no-install-project \
     && find /opt/venv -type d \
          \( -name "__pycache__" -o -name "tests" -o -name "test" -o -name "testing" \) \
          -prune -exec rm -rf {} + \

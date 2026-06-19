@@ -13,12 +13,11 @@ class ModeId(IntEnum):
     FAST = 1  # modeId="fast"
     EXPERT = 2  # modeId="expert"
     HEAVY = 3  # modeId="heavy"    — only available on heavy-pool accounts
-    GROK_4_3 = 4  # modeId="grok-420-computer-use-sa" — super/heavy only
+    GROK_4_3 = 4  # legacy quota slot; no current public model maps here
     CONSOLE = 5  # console.x.ai local quota window
 
     def to_api_str(self) -> str:
         _OVERRIDES: dict[int, str] = {
-            ModeId.GROK_4_3: "grok-420-computer-use-sa",
             ModeId.CONSOLE: "console",
         }
         return _OVERRIDES.get(self, self.name.lower())  # type: ignore[arg-type]
@@ -65,7 +64,6 @@ ALL_MODES_FULL: tuple[ModeId, ...] = (
     ModeId.FAST,
     ModeId.EXPERT,
     ModeId.HEAVY,
-    ModeId.GROK_4_3,
     ModeId.CONSOLE,
 )
 

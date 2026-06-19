@@ -517,9 +517,14 @@ class RedisAccountRepository:
         self,
         tokens: list[str],
     ) -> list[AccountRecord]:
+        if not tokens:
+            return []
         results: list[AccountRecord] = []
-        for token in tokens:
-            h = await self._r.hgetall(_record_key(token))
+        async with self._r.pipeline() as pipe:
+            for token in tokens:
+                pipe.hgetall(_record_key(token))
+            hashes = await pipe.execute()
+        for token, h in zip(tokens, hashes, strict=True):
             if h:
                 results.append(self._from_hash(token, h))
         return results

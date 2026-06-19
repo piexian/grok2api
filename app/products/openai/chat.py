@@ -122,10 +122,13 @@ def _transport_upstream_error(exc: BaseException, *, context: str) -> UpstreamEr
 async def _quota_sync(token: str, mode_id: int) -> None:
     """Fire-and-forget: fetch real quota after a successful call."""
     try:
-        if current_strategy() != "quota":
-            return
         svc = get_refresh_service()
-        if svc:
+        if not svc:
+            return
+        if mode_id == int(ModeId.CONSOLE):
+            await svc.record_success_async(token)
+            return
+        if current_strategy() == "quota":
             await svc.refresh_call_async(token, mode_id)
     except Exception as exc:
         logger.warning(
@@ -147,7 +150,11 @@ async def _fail_sync(token: str, mode_id: int, exc: BaseException | None = None)
         svc = get_refresh_service()
         if svc:
             await svc.record_failure_async(token, mode_id, exc)
-            if (current_strategy() == "quota" and getattr(exc, "status", None) == 429):
+            if (
+                current_strategy() == "quota"
+                and mode_id != int(ModeId.CONSOLE)
+                and getattr(exc, "status", None) == 429
+            ):
                 result = await svc.refresh_on_demand()
                 logger.info(
                     "account on-demand refresh triggered: token={}... mode_id={} refreshed={} failed={} rate_limited={}",
@@ -506,7 +513,7 @@ async def _console_post(
 
     if response.status_code != 200:
         try:
-            body = response.content.decode("utf-8", "replace")[:400]
+            body = response.content.decode("utf-8", "replace")[:4000]
         except Exception:
             body = ""
         await session.__aexit__(None, None, None)
@@ -560,9 +567,7 @@ async def _console_completions(
       - SSE streaming for both text and tool call arguments
       - URL citation annotations from upstream search results
     """
-    # Apply per-model default effort when caller didn't specify. Hybrid
-    # reasoning models (grok-4, grok-4.3, grok-4.20) default to "high" so
-    # callers expecting "think hard by default" get it without explicit opt-in.
+    # Apply per-model default effort when caller didn't specify.
     if reasoning_effort is None and spec.default_reasoning_effort:
         reasoning_effort = spec.default_reasoning_effort
     cfg = get_config()
@@ -612,6 +617,7 @@ async def _console_completions(
                     spec,
                     now_s_override=now_s(),
                     exclude_tokens=excluded or None,
+                    console_model=console_model,
                 )
                 if acct is None:
                     raise RateLimitError("No available accounts for this model tier")
@@ -639,6 +645,7 @@ async def _console_completions(
                             timeout_s=timeout_s,
                         )
                         try:
+                            yield ": heartbeat\n\n"
                             async for raw_line in response.aiter_lines():
                                 kind, payload = classify_console_sse_line(raw_line)
                                 if kind == "event":
@@ -801,7 +808,14 @@ async def _console_completions(
                     kind = (
                         FeedbackKind.SUCCESS
                         if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR)
-                    await directory.feedback(token, kind, selected_mode_id, now_s_val=now_s())
+                    await directory.feedback(
+                        token,
+                        kind,
+                        selected_mode_id,
+                        now_s_val=now_s(),
+                        console_model=console_model,
+                        upstream_error=fail_exc,
+                    )
                     if success:
                         asyncio.create_task(_quota_sync(
                             token, selected_mode_id)).add_done_callback(_log_task_exception)
@@ -829,6 +843,7 @@ async def _console_completions(
             spec,
             now_s_override=now_s(),
             exclude_tokens=excluded or None,
+            console_model=console_model,
         )
         if acct is None:
             raise RateLimitError("No available accounts for this model tier")
@@ -907,7 +922,14 @@ async def _console_completions(
             kind = (
                 FeedbackKind.SUCCESS
                 if success else _feedback_kind(fail_exc) if fail_exc else FeedbackKind.SERVER_ERROR)
-            await directory.feedback(token, kind, selected_mode_id, now_s_val=now_s())
+            await directory.feedback(
+                token,
+                kind,
+                selected_mode_id,
+                now_s_val=now_s(),
+                console_model=console_model,
+                upstream_error=fail_exc,
+            )
             if success:
                 asyncio.create_task(_quota_sync(token, selected_mode_id)).add_done_callback(_log_task_exception)
             else:
@@ -1077,6 +1099,7 @@ async def completions(
                         ended = False
                         sieve = ToolSieve(tool_names)
                         tool_calls_emitted = False
+                        yield ": heartbeat\n\n"
                         async for line in _stream_chat(
                                 token=token,
                                 mode_id=ModeId(selected_mode_id),
