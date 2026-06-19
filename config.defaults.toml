@@ -112,6 +112,12 @@ max_retries = 1
 on_codes = "429,401,503"
 
 
+# ==================== 账户维护 ====================
+[account]
+# 导入、新增或替换账户池后，刷新检测成功时自动为正常/限流账户开启 NSFW
+auto_nsfw_on_import = false
+
+
 [account.refresh]
 # 总开关：true=配额刷新模式（主动探测，选号评分）；false=自动重试模式（随机选号，零探测）
 enabled = true
