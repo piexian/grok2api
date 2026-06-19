@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: 文档与使用说明
-    url: https://blog.cheny.me/blog/posts/grok2api
-    about: 提交 Issue 前请先查看文档，很多常见问题已有说明。
+    url: https://github.com/piexian/grok2api#readme
+    about: 提交 Issue 前请先查看当前仓库 README。
