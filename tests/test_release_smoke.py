@@ -107,7 +107,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.10")
+        self.assertEqual(get_project_version(), "2.0.11")
 
     def test_prerelease_version_update_ordering(self):
         self.assertTrue(_is_newer("2.0.7", "2.0.7-beta"))
@@ -140,6 +140,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                         "account_grok_4_3_quota_v1": True,
                         "account_basic_fast_only_quota_v2": True,
                         "account_console_quota_v1": True,
+                        "account_console_quota_v2": True,
                     }
                 }
             }
@@ -206,6 +207,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(migrations["account_grok_4_3_quota_v1"])
                 self.assertTrue(migrations["account_basic_fast_only_quota_v2"])
                 self.assertTrue(migrations["account_console_quota_v1"])
+                self.assertTrue(migrations["account_console_quota_v2"])
             finally:
                 await repo.close()
 
@@ -215,10 +217,26 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             await repo.initialize()
             try:
                 await repo.upsert_accounts(
-                    [AccountUpsert(token="basic-console-token", pool="basic")]
+                    [
+                        AccountUpsert(token="basic-console-empty", pool="basic"),
+                        AccountUpsert(token="basic-console-expired", pool="basic"),
+                    ]
                 )
                 await repo.patch_accounts(
-                    [AccountPatch(token="basic-console-token", quota_console={})]
+                    [
+                        AccountPatch(token="basic-console-empty", quota_console={}),
+                        AccountPatch(
+                            token="basic-console-expired",
+                            quota_console={
+                                "remaining": 0,
+                                "total": 30,
+                                "window_seconds": 900,
+                                "reset_at": 1,
+                                "synced_at": None,
+                                "source": 2,
+                            },
+                        ),
+                    ]
                 )
 
                 config = _MemoryConfigBackend(
@@ -227,20 +245,24 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                             "migrations": {
                                 "account_grok_4_3_quota_v1": True,
                                 "account_basic_fast_only_quota_v2": True,
+                                "account_console_quota_v1": True,
                             }
                         }
                     }
                 )
                 await run_account_backfill_migrations(config, repo)
 
-                record = (await repo.get_accounts(["basic-console-token"]))[0]
-                console = record.quota_set().console
-                self.assertIsNotNone(console)
-                self.assertEqual(console.remaining, 30)
-                self.assertEqual(console.total, 30)
-                self.assertEqual(console.window_seconds, 900)
+                records = await repo.get_accounts(
+                    ["basic-console-empty", "basic-console-expired"]
+                )
+                for record in records:
+                    console = record.quota_set().console
+                    self.assertIsNotNone(console)
+                    self.assertEqual(console.remaining, 30)
+                    self.assertEqual(console.total, 30)
+                    self.assertEqual(console.window_seconds, 900)
                 self.assertTrue(
-                    config.data["startup"]["migrations"]["account_console_quota_v1"]
+                    config.data["startup"]["migrations"]["account_console_quota_v2"]
                 )
             finally:
                 await repo.close()
@@ -671,7 +693,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.10")
+                self.assertEqual(json.loads(body)["version"], "2.0.11")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)

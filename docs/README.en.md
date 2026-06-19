@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
-  <a href="../pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.10-111827"></a>
+  <a href="../pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.11-111827"></a>
   <a href="../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
   <a href="../README.md"><img alt="Chinese" src="https://img.shields.io/badge/中文-2563EB?logo=bookstack&logoColor=white"></a>
 </p>
@@ -48,8 +48,8 @@ docker run -d \
 
 | Image | Notes |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to the 2.0.10 line |
-| `ghcr.io/piexian/grok2api:2.0.10` | Fixed version tag |
+| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to the 2.0.11 line |
+| `ghcr.io/piexian/grok2api:2.0.11` | Fixed version tag |
 
 ### Docker Compose
 

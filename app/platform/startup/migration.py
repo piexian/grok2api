@@ -45,6 +45,7 @@ _MIGRATIONS_SECTION = "migrations"
 _MIGRATION_GROK_4_3_QUOTA = "account_grok_4_3_quota_v1"
 _MIGRATION_BASIC_FAST_ONLY_QUOTA = "account_basic_fast_only_quota_v2"
 _MIGRATION_CONSOLE_QUOTA = "account_console_quota_v1"
+_MIGRATION_CONSOLE_QUOTA_RESET = "account_console_quota_v2"
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,13 @@ async def run_account_backfill_migrations(
         config_backend,
         account_repo,
         name=_MIGRATION_CONSOLE_QUOTA,
+        probe_method="needs_console_quota_backfill",
+        migration=_backfill_console_quota,
+    )
+    await _run_marked_account_migration(
+        config_backend,
+        account_repo,
+        name=_MIGRATION_CONSOLE_QUOTA_RESET,
         probe_method="needs_console_quota_backfill",
         migration=_backfill_console_quota,
     )
@@ -389,8 +397,10 @@ async def _normalize_basic_fast_only_quota(repo: "AccountRepository") -> None:
 async def _backfill_console_quota(repo: "AccountRepository") -> None:
     from app.control.account.commands import AccountPatch, ListAccountsQuery
     from app.control.account.quota_defaults import default_quota_window
+    from app.platform.runtime.clock import now_ms
 
     patches: list[AccountPatch] = []
+    now = now_ms()
     page = 1
     while True:
         result = await repo.list_accounts(
@@ -405,6 +415,16 @@ async def _backfill_console_quota(repo: "AccountRepository") -> None:
                 current is not None
                 and current.total == window.total
                 and current.window_seconds == window.window_seconds
+                and current.remaining > 0
+            ):
+                continue
+            if (
+                current is not None
+                and current.total == window.total
+                and current.window_seconds == window.window_seconds
+                and current.remaining <= 0
+                and current.reset_at is not None
+                and not current.is_window_expired(now)
             ):
                 continue
             patches.append(
