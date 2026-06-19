@@ -8,7 +8,7 @@ Canonical quota totals per pool type (from upstream rate-limits API):
   heavy        150     400     150       20       window: 7200 s
 
 Console.x.ai models use a local-only quota window shared by every pool:
-30 calls / 15 minutes. The grok.com rate-limits API does not know this
+20 calls / 60 minutes. The grok.com rate-limits API does not know this
 mode, so callers that sync upstream usage must use ``usage_sync_mode_ids``.
 
 Pool inference uses ``auto.total`` as the primary signal for paid accounts.
@@ -47,8 +47,9 @@ def _w(remaining: int, total: int, window_seconds: int) -> QuotaWindow:
 
 BASIC_FAST_LIMIT = 30
 BASIC_FAST_WINDOW_SECONDS = 86_400
-CONSOLE_LIMIT = 30
-CONSOLE_WINDOW_SECONDS = 900
+CONSOLE_LIMIT = 20
+CONSOLE_WINDOW_SECONDS = 3_600
+CONSOLE_RECOVERY_REMAINING_THRESHOLD = 12
 
 BASIC_QUOTA_DEFAULTS = AccountQuotaSet(
     auto=_w(0, 0, 0),  # unsupported on basic accounts
@@ -162,6 +163,15 @@ def normalize_quota_window(
             synced_at=window.synced_at,
             source=window.source,
         )
+    if mode_id == 5:
+        return QuotaWindow(
+            remaining=max(0, min(int(window.remaining), CONSOLE_LIMIT)),
+            total=CONSOLE_LIMIT,
+            window_seconds=CONSOLE_WINDOW_SECONDS,
+            reset_at=window.reset_at,
+            synced_at=window.synced_at,
+            source=window.source,
+        )
     return window
 
 
@@ -210,6 +220,9 @@ __all__ = [
     "LITE_QUOTA_DEFAULTS",
     "SUPER_QUOTA_DEFAULTS",
     "HEAVY_QUOTA_DEFAULTS",
+    "CONSOLE_LIMIT",
+    "CONSOLE_RECOVERY_REMAINING_THRESHOLD",
+    "CONSOLE_WINDOW_SECONDS",
     "default_quota_set",
     "default_quota_window",
     "infer_pool",

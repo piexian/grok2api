@@ -14,6 +14,7 @@ from app.control.model.enums import ALL_MODES_FULL
 from .enums import AccountStatus, QuotaSource
 from .models import AccountRecord, QuotaWindow
 from .quota_defaults import (
+    CONSOLE_RECOVERY_REMAINING_THRESHOLD,
     default_quota_window,
     infer_pool,
     normalize_quota_window,
@@ -659,7 +660,7 @@ class AccountRefreshService:
                     if mode_id == 5:
                         if (
                             reset_at is None
-                            and new_remaining <= 15
+                            and new_remaining <= CONSOLE_RECOVERY_REMAINING_THRESHOLD
                             and existing.window_seconds > 0
                         ):
                             reset_at = now + existing.window_seconds * 1000

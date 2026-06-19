@@ -46,6 +46,7 @@ _MIGRATION_GROK_4_3_QUOTA = "account_grok_4_3_quota_v1"
 _MIGRATION_BASIC_FAST_ONLY_QUOTA = "account_basic_fast_only_quota_v2"
 _MIGRATION_CONSOLE_QUOTA = "account_console_quota_v1"
 _MIGRATION_CONSOLE_QUOTA_RESET = "account_console_quota_v2"
+_MIGRATION_CONSOLE_QUOTA_LIMITS = "account_console_quota_v3"
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +97,13 @@ async def run_account_backfill_migrations(
         config_backend,
         account_repo,
         name=_MIGRATION_CONSOLE_QUOTA_RESET,
+        probe_method="needs_console_quota_backfill",
+        migration=_backfill_console_quota,
+    )
+    await _run_marked_account_migration(
+        config_backend,
+        account_repo,
+        name=_MIGRATION_CONSOLE_QUOTA_LIMITS,
         probe_method="needs_console_quota_backfill",
         migration=_backfill_console_quota,
     )

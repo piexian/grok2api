@@ -12,6 +12,9 @@ from app.control.account.enums import AccountStatus, FeedbackKind, QuotaSource
 from app.control.account.invalid_credentials import mark_account_invalid_credentials
 from app.control.account.models import AccountRecord, QuotaWindow
 from app.control.account.quota_defaults import (
+    CONSOLE_LIMIT,
+    CONSOLE_RECOVERY_REMAINING_THRESHOLD,
+    CONSOLE_WINDOW_SECONDS,
     default_quota_set,
     infer_pool,
     supported_mode_ids,
@@ -107,7 +110,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.11")
+        self.assertEqual(get_project_version(), "2.0.12")
 
     def test_prerelease_version_update_ordering(self):
         self.assertTrue(_is_newer("2.0.7", "2.0.7-beta"))
@@ -126,8 +129,11 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
         console = default_quota_set("basic").console
         self.assertIsNotNone(console)
-        self.assertEqual(console.total, 30)
-        self.assertEqual(console.window_seconds, 900)
+        self.assertEqual(CONSOLE_LIMIT, 20)
+        self.assertEqual(CONSOLE_WINDOW_SECONDS, 3600)
+        self.assertEqual(CONSOLE_RECOVERY_REMAINING_THRESHOLD, 12)
+        self.assertEqual(console.total, CONSOLE_LIMIT)
+        self.assertEqual(console.window_seconds, CONSOLE_WINDOW_SECONDS)
         self.assertEqual(resolve("grok-4.3").mode_id, ModeId.CONSOLE)
         self.assertEqual(resolve("grok-build-0.1").mode_id, ModeId.CONSOLE)
         self.assertEqual(resolve("grok-build-0.1").console_model, "grok-build-0.1")
@@ -141,6 +147,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                         "account_basic_fast_only_quota_v2": True,
                         "account_console_quota_v1": True,
                         "account_console_quota_v2": True,
+                        "account_console_quota_v3": True,
                     }
                 }
             }
@@ -198,8 +205,8 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(qs.heavy)
                 self.assertIsNone(qs.grok_4_3)
                 self.assertIsNotNone(qs.console)
-                self.assertEqual(qs.console.total, 30)
-                self.assertEqual(qs.console.window_seconds, 900)
+                self.assertEqual(qs.console.total, 20)
+                self.assertEqual(qs.console.window_seconds, 3600)
                 self.assertFalse(
                     await repo.needs_basic_fast_only_quota_normalization()
                 )
@@ -208,6 +215,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(migrations["account_basic_fast_only_quota_v2"])
                 self.assertTrue(migrations["account_console_quota_v1"])
                 self.assertTrue(migrations["account_console_quota_v2"])
+                self.assertTrue(migrations["account_console_quota_v3"])
             finally:
                 await repo.close()
 
@@ -246,6 +254,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                                 "account_grok_4_3_quota_v1": True,
                                 "account_basic_fast_only_quota_v2": True,
                                 "account_console_quota_v1": True,
+                                "account_console_quota_v2": True,
                             }
                         }
                     }
@@ -258,11 +267,11 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 for record in records:
                     console = record.quota_set().console
                     self.assertIsNotNone(console)
-                    self.assertEqual(console.remaining, 30)
-                    self.assertEqual(console.total, 30)
-                    self.assertEqual(console.window_seconds, 900)
+                    self.assertEqual(console.remaining, 20)
+                    self.assertEqual(console.total, 20)
+                    self.assertEqual(console.window_seconds, 3600)
                 self.assertTrue(
-                    config.data["startup"]["migrations"]["account_console_quota_v2"]
+                    config.data["startup"]["migrations"]["account_console_quota_v3"]
                 )
             finally:
                 await repo.close()
@@ -418,9 +427,9 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(records), 1)
             qs = records[0].quota_set()
             self.assertIsNotNone(qs.console)
-            self.assertEqual(qs.console.remaining, 30)
-            self.assertEqual(qs.console.total, 30)
-            self.assertEqual(qs.console.window_seconds, 900)
+            self.assertEqual(qs.console.remaining, 20)
+            self.assertEqual(qs.console.total, 20)
+            self.assertEqual(qs.console.window_seconds, 3600)
 
             self.assertEqual(await repo.get_global_success_count(), 0)
             self.assertEqual(await repo.increment_global_success_count(2), 2)
@@ -432,8 +441,8 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                         token="tok_console",
                         quota_console={
                             "remaining": 7,
-                            "total": 30,
-                            "window_seconds": 900,
+                            "total": 20,
+                            "window_seconds": 3600,
                             "reset_at": None,
                             "synced_at": None,
                             "source": 0,
@@ -525,8 +534,8 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                             token="tok_console_timer",
                             quota_console={
                                 "remaining": 17,
-                                "total": 30,
-                                "window_seconds": 900,
+                                "total": 20,
+                                "window_seconds": 3600,
                                 "reset_at": None,
                                 "synced_at": None,
                                 "source": int(QuotaSource.DEFAULT),
@@ -563,8 +572,8 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                         token="tok_admin_console",
                         quota_console={
                             "remaining": 9,
-                            "total": 30,
-                            "window_seconds": 900,
+                            "total": 20,
+                            "window_seconds": 3600,
                             "reset_at": None,
                             "synced_at": None,
                             "source": 2,
@@ -693,7 +702,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.11")
+                self.assertEqual(json.loads(body)["version"], "2.0.12")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)

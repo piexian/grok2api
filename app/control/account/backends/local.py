@@ -22,7 +22,11 @@ from ..models import (
     AccountRecord,
     RuntimeSnapshot,
 )
-from ..quota_defaults import default_quota_set
+from ..quota_defaults import (
+    CONSOLE_LIMIT,
+    CONSOLE_WINDOW_SECONDS,
+    default_quota_set,
+)
 
 _TBL = "accounts"
 _META = "account_meta"
@@ -550,8 +554,8 @@ class LocalAccountRepository:
                             OR {_json_int("quota_grok_4_3", "$.total")} != 0
                             OR {fast_total} != 30
                             OR {fast_window} != 86400
-                            OR {console_total} != 30
-                            OR {console_window} != 900
+                            OR {console_total} != {CONSOLE_LIMIT}
+                            OR {console_window} != {CONSOLE_WINDOW_SECONDS}
                           )
                         LIMIT 1
                         """
