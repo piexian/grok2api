@@ -32,7 +32,7 @@ from app.control.account.scheduler import (
 from app.control.model.enums import ModeId
 from app.control.model.registry import resolve
 from app.dataplane.account import AccountDirectory
-from app.dataplane.account.selector import set_strategy
+from app.dataplane.account.selector import current_strategy, set_strategy
 from app.main import app
 from app.platform.errors import UpstreamError
 from app.platform.meta import get_project_version
@@ -107,7 +107,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.9")
+        self.assertEqual(get_project_version(), "2.0.10")
 
     def test_prerelease_version_update_ordering(self):
         self.assertTrue(_is_newer("2.0.7", "2.0.7-beta"))
@@ -139,6 +139,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                     "migrations": {
                         "account_grok_4_3_quota_v1": True,
                         "account_basic_fast_only_quota_v2": True,
+                        "account_console_quota_v1": True,
                     }
                 }
             }
@@ -204,6 +205,43 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 migrations = config.data["startup"]["migrations"]
                 self.assertTrue(migrations["account_grok_4_3_quota_v1"])
                 self.assertTrue(migrations["account_basic_fast_only_quota_v2"])
+                self.assertTrue(migrations["account_console_quota_v1"])
+            finally:
+                await repo.close()
+
+    async def test_account_startup_backfills_console_quota_after_old_markers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            try:
+                await repo.upsert_accounts(
+                    [AccountUpsert(token="basic-console-token", pool="basic")]
+                )
+                await repo.patch_accounts(
+                    [AccountPatch(token="basic-console-token", quota_console={})]
+                )
+
+                config = _MemoryConfigBackend(
+                    {
+                        "startup": {
+                            "migrations": {
+                                "account_grok_4_3_quota_v1": True,
+                                "account_basic_fast_only_quota_v2": True,
+                            }
+                        }
+                    }
+                )
+                await run_account_backfill_migrations(config, repo)
+
+                record = (await repo.get_accounts(["basic-console-token"]))[0]
+                console = record.quota_set().console
+                self.assertIsNotNone(console)
+                self.assertEqual(console.remaining, 30)
+                self.assertEqual(console.total, 30)
+                self.assertEqual(console.window_seconds, 900)
+                self.assertTrue(
+                    config.data["startup"]["migrations"]["account_console_quota_v1"]
+                )
             finally:
                 await repo.close()
 
@@ -410,6 +448,47 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(page.total, 1)
             await repo.close()
 
+    async def test_console_reserve_any_ignores_global_cooling(self):
+        previous = current_strategy()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            try:
+                await repo.upsert_accounts(
+                    [AccountUpsert(token="tok_console_cooling", pool="basic")]
+                )
+                directory = AccountDirectory(repo)
+                await directory.bootstrap()
+                table = directory._table
+                idx = table.idx_by_token["tok_console_cooling"]
+                table.cooling_until_s_by_idx[idx] = 2000
+
+                set_strategy("random")
+                self.assertIsNone(
+                    await directory.reserve_any((0,), now_s_override=1000)
+                )
+                lease = await directory.reserve_any(
+                    (0,),
+                    console_model="grok-4.3",
+                    now_s_override=1000,
+                )
+                self.assertIsNotNone(lease)
+                self.assertEqual(lease.token, "tok_console_cooling")
+                await directory.release(lease)
+
+                set_strategy("quota")
+                lease = await directory.reserve_any(
+                    (0,),
+                    console_model="grok-4.3",
+                    now_s_override=1000,
+                )
+                self.assertIsNotNone(lease)
+                self.assertEqual(lease.token, "tok_console_cooling")
+                await directory.release(lease)
+            finally:
+                set_strategy(previous)
+                await repo.close()
+
     async def test_console_success_sync_records_usage_without_local_quota_decrement(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = LocalAccountRepository(Path(tmp) / "accounts.db")
@@ -592,7 +671,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.9")
+                self.assertEqual(json.loads(body)["version"], "2.0.10")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)

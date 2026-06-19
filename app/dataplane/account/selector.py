@@ -106,6 +106,7 @@ def select_any(
             exclude_idxs=exclude_idxs,
             prefer_tag_idxs=prefer_tag_idxs,
             now_s=now_s,
+            ignore_cooling=ignore_cooling,
         )
     return _quota_select_any(
         table, pool_id,
@@ -165,6 +166,7 @@ def _quota_select_any(
     exclude_idxs: frozenset[int] | None,
     prefer_tag_idxs: set[int] | None,
     now_s: int,
+    ignore_cooling: bool = False,
 ) -> int | None:
     candidates: set[int] = _pool_union(table, pool_id)
     if not candidates:
@@ -173,6 +175,9 @@ def _quota_select_any(
     working = candidates.copy()
     if exclude_idxs:
         working -= exclude_idxs
+    if not ignore_cooling:
+        cooling_col = table.cooling_until_s_by_idx
+        working = {idx for idx in working if int(cooling_col[idx]) <= now_s}
     if not working:
         return None
 

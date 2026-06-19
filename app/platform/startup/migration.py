@@ -44,6 +44,7 @@ _STARTUP_SECTION = "startup"
 _MIGRATIONS_SECTION = "migrations"
 _MIGRATION_GROK_4_3_QUOTA = "account_grok_4_3_quota_v1"
 _MIGRATION_BASIC_FAST_ONLY_QUOTA = "account_basic_fast_only_quota_v2"
+_MIGRATION_CONSOLE_QUOTA = "account_console_quota_v1"
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +83,13 @@ async def run_account_backfill_migrations(
         name=_MIGRATION_BASIC_FAST_ONLY_QUOTA,
         probe_method="needs_basic_fast_only_quota_normalization",
         migration=_normalize_basic_fast_only_quota,
+    )
+    await _run_marked_account_migration(
+        config_backend,
+        account_repo,
+        name=_MIGRATION_CONSOLE_QUOTA,
+        probe_method="needs_console_quota_backfill",
+        migration=_backfill_console_quota,
     )
 
 
@@ -274,6 +282,7 @@ def _record_to_patch(r) -> "AccountPatch":
         quota_expert=qs.expert.to_dict() if qs.expert else None,
         quota_heavy=qs.heavy.to_dict()    if qs.heavy    else None,
         quota_grok_4_3=qs.grok_4_3.to_dict() if qs.grok_4_3 else None,
+        quota_console=qs.console.to_dict() if qs.console else None,
         # Usage counts — target starts at 0, so actual value == delta.
         usage_use_delta=r.usage_use_count   or None,
         usage_fail_delta=r.usage_fail_count or None,
@@ -375,6 +384,45 @@ async def _normalize_basic_fast_only_quota(repo: "AccountRepository") -> None:
         res = await repo.patch_accounts(batch)
         total += res.patched
     logger.info("account: normalized {} basic accounts to fast-only quota", total)
+
+
+async def _backfill_console_quota(repo: "AccountRepository") -> None:
+    from app.control.account.commands import AccountPatch, ListAccountsQuery
+    from app.control.account.quota_defaults import default_quota_window
+
+    patches: list[AccountPatch] = []
+    page = 1
+    while True:
+        result = await repo.list_accounts(
+            ListAccountsQuery(page=page, page_size=_BATCH, include_deleted=False)
+        )
+        for record in result.items:
+            window = default_quota_window(record.pool, 5)
+            if window is None:
+                continue
+            current = record.quota_set().console
+            if (
+                current is not None
+                and current.total == window.total
+                and current.window_seconds == window.window_seconds
+            ):
+                continue
+            patches.append(
+                AccountPatch(token=record.token, quota_console=window.to_dict())
+            )
+        if page >= result.total_pages:
+            break
+        page += 1
+
+    if not patches:
+        return
+
+    total = 0
+    for i in range(0, len(patches), _BATCH):
+        batch = patches[i : i + _BATCH]
+        res = await repo.patch_accounts(batch)
+        total += res.patched
+    logger.info("account: backfilled quota_console for {} accounts", total)
 
 
 # ---------------------------------------------------------------------------

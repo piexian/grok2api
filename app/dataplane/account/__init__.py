@@ -289,6 +289,13 @@ class AccountDirectory:
                 )
                 fb.apply_rate_limited_console(table, idx)
                 fb.update_last_fail(table, idx, ts)
+                logger.info(
+                    "console cooldown applied: model={} token={}... scope={} cooldown_sec={}",
+                    console_model,
+                    token[:10],
+                    "team" if team_scoped else "account",
+                    cooldown_sec,
+                )
 
             elif kind == FeedbackKind.RATE_LIMITED:
                 if strategy == "random":

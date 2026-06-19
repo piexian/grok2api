@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
-  <a href="pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.9-111827"></a>
+  <a href="pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.10-111827"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
   <a href="docs/README.en.md"><img alt="English" src="https://img.shields.io/badge/English-2563EB?logo=bookstack&logoColor=white"></a>
 </p>
@@ -48,8 +48,8 @@ docker run -d \
 
 | 镜像 | 说明 |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | 当前 latest，指向 2.0.9 系列 |
-| `ghcr.io/piexian/grok2api:2.0.9` | 固定版本标签 |
+| `ghcr.io/piexian/grok2api:latest` | 当前 latest，指向 2.0.10 系列 |
+| `ghcr.io/piexian/grok2api:2.0.10` | 固定版本标签 |
 
 ### Docker Compose
 
