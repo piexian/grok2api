@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
-  <a href="pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.12-111827"></a>
+  <a href="pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.13-111827"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
   <a href="docs/README.en.md"><img alt="English" src="https://img.shields.io/badge/English-2563EB?logo=bookstack&logoColor=white"></a>
 </p>
@@ -25,6 +25,7 @@ Grok2API 将 Grok Web、console.x.ai、Imagine 和相关媒体接口统一封装
 ## 主要能力
 
 - OpenAI 兼容接口：`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/images/edits`、`/v1/videos`。
+- Chat / Responses：grok.com 模型走 Web Chat；console 模型走 console.x.ai `/v1/responses`，常用 OpenAI Chat 字段会按上游能力映射。
 - Anthropic 兼容接口：`/v1/messages`。
 - 多账号池：basic / lite / super / heavy 分层选择，支持本地、Redis、MySQL、PostgreSQL 存储。
 - 配额与失败反馈：grok.com 文本模型使用上游 quota；console.x.ai 使用独立运行时限速和冷却，不与 grok.com Chat 混算。
@@ -48,8 +49,8 @@ docker run -d \
 
 | 镜像 | 说明 |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | 当前 latest，指向 2.0.12 系列 |
-| `ghcr.io/piexian/grok2api:2.0.12` | 固定版本标签 |
+| `ghcr.io/piexian/grok2api:latest` | 当前 latest，指向 2.0.13 系列 |
+| `ghcr.io/piexian/grok2api:2.0.13` | 固定版本标签 |
 
 ### Docker Compose
 
@@ -114,6 +115,7 @@ console.x.ai 说明：
 
 - 该路径使用 grok.com SSO Cookie，但限速来自 console.x.ai。
 - 不同 console 模型的请求参数会按上游兼容性自动处理。
+- Chat Completions 入参支持 `max_completion_tokens`、`response_format`、`store`、`service_tier`、`user`、`stream_options` 等常用字段；`metadata` 可接收但不会转发给 console.x.ai。
 - 429 会按 console 模型独立冷却，不与 grok.com Chat 混算。
 
 ### Image
@@ -123,18 +125,21 @@ console.x.ai 说明：
 | `grok-imagine-image-lite` | grok.com app-chat | basic | 无精确画幅控制 |
 | `grok-imagine-image` | Imagine WebSocket | super+ | speed mode |
 | `grok-imagine-image-pro` | Imagine WebSocket | super+ | quality/pro mode |
+| `grok-imagine-image-quality` | Imagine WebSocket | super+ | quality/pro mode，支持图片编辑 |
 
 ### Image Edit
 
 | 模型名 | 上游路径 | 账号层级 |
 | :-- | :-- | :-- |
 | `grok-imagine-image-edit` | grok.com app-chat edit flow | super+ |
+| `grok-imagine-image-quality` | Imagine image edit flow | super+ |
 
 ### Video
 
 | 模型名 | 上游路径 | 账号层级 |
 | :-- | :-- | :-- |
 | `grok-imagine-video` | grok.com media API | super+ |
+| `grok-imagine-video-1.5` | grok.com media API | super+ |
 
 ## API 示例
 
@@ -198,7 +203,7 @@ curl http://localhost:8000/v1/images/generations \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-imagine-image",
+    "model": "grok-imagine-image-quality",
     "prompt": "一只在太空漂浮的猫，电影感",
     "n": 1,
     "size": "1024x1024",
@@ -210,7 +215,7 @@ curl http://localhost:8000/v1/images/generations \
 
 | 字段 | 说明 |
 | :-- | :-- |
-| `model` | `grok-imagine-image-lite`、`grok-imagine-image`、`grok-imagine-image-pro` |
+| `model` | `grok-imagine-image-lite`、`grok-imagine-image`、`grok-imagine-image-pro`、`grok-imagine-image-quality` |
 | `n` | lite 为 `1-4`，其他图像模型为 `1-10` |
 | `size` | `1280x720`、`720x1280`、`1792x1024`、`1024x1792`、`1024x1024` |
 | `response_format` | `url` 或 `b64_json` |
@@ -233,7 +238,7 @@ curl http://localhost:8000/v1/images/edits \
 ```bash
 curl http://localhost:8000/v1/videos \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -F "model=grok-imagine-video" \
+  -F "model=grok-imagine-video-1.5" \
   -F "prompt=霓虹雨夜街头，电影感慢镜头追拍" \
   -F "seconds=10" \
   -F "size=1792x1024" \
@@ -256,6 +261,7 @@ curl -L http://localhost:8000/v1/videos/<video_id>/content \
 
 | 字段 | 说明 |
 | :-- | :-- |
+| `model` | `grok-imagine-video` 或 `grok-imagine-video-1.5` |
 | `seconds` | `6`、`10`、`12`、`16`、`20` |
 | `size` | `720x1280`、`1280x720`、`1024x1024`、`1024x1792`、`1792x1024` |
 | `resolution_name` | `480p` 或 `720p` |

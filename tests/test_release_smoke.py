@@ -126,7 +126,7 @@ async def _asgi_get(path: str) -> tuple[int, bytes]:
 
 class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
     def test_version_metadata(self):
-        self.assertEqual(get_project_version(), "2.0.12")
+        self.assertEqual(get_project_version(), "2.0.13")
 
     def test_prerelease_version_update_ordering(self):
         self.assertTrue(_is_newer("2.0.7", "2.0.7-beta"))
@@ -1276,7 +1276,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
 
                 status, body = await _asgi_get("/meta")
                 self.assertEqual(status, 200)
-                self.assertEqual(json.loads(body)["version"], "2.0.12")
+                self.assertEqual(json.loads(body)["version"], "2.0.13")
 
                 status, body = await _asgi_get("/v1/models")
                 self.assertEqual(status, 200)

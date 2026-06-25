@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.13%2B-3776AB?logo=python&logoColor=white"></a>
   <a href="https://fastapi.tiangolo.com/"><img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-0.119%2B-009688?logo=fastapi&logoColor=white"></a>
-  <a href="../pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.12-111827"></a>
+  <a href="../pyproject.toml"><img alt="Version" src="https://img.shields.io/badge/version-2.0.13-111827"></a>
   <a href="../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-16a34a"></a>
   <a href="../README.md"><img alt="Chinese" src="https://img.shields.io/badge/中文-2563EB?logo=bookstack&logoColor=white"></a>
 </p>
@@ -25,6 +25,7 @@ Grok2API wraps Grok Web, console.x.ai, Imagine, and media APIs behind OpenAI / A
 ## Features
 
 - OpenAI-compatible APIs: `/v1/models`, `/v1/chat/completions`, `/v1/responses`, `/v1/images/generations`, `/v1/images/edits`, `/v1/videos`.
+- Chat / Responses: grok.com models use Web Chat; console models use console.x.ai `/v1/responses`, with common OpenAI Chat fields mapped to upstream-compatible payloads.
 - Anthropic-compatible API: `/v1/messages`.
 - Account pools: basic / lite / super / heavy, with local, Redis, MySQL, and PostgreSQL storage backends.
 - Quota and feedback: grok.com text modes use upstream quota; console.x.ai has independent runtime rate-limit parsing and cooldown.
@@ -48,8 +49,8 @@ docker run -d \
 
 | Image | Notes |
 | :-- | :-- |
-| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to the 2.0.12 line |
-| `ghcr.io/piexian/grok2api:2.0.12` | Fixed version tag |
+| `ghcr.io/piexian/grok2api:latest` | Current latest, pointing to the 2.0.13 line |
+| `ghcr.io/piexian/grok2api:2.0.13` | Fixed version tag |
 
 ### Docker Compose
 
@@ -114,6 +115,7 @@ Console notes:
 
 - console.x.ai uses Grok SSO cookies but has its own rate limits.
 - Request parameters are normalized per console model for upstream compatibility.
+- Chat Completions accepts common fields such as `max_completion_tokens`, `response_format`, `store`, `service_tier`, `user`, and `stream_options`; `metadata` is accepted locally but is not forwarded to console.x.ai.
 - 429 responses are cooled down per console model, separately from grok.com Chat.
 
 ### Image
@@ -123,18 +125,21 @@ Console notes:
 | `grok-imagine-image-lite` | grok.com app-chat | basic | no precise aspect-ratio control |
 | `grok-imagine-image` | Imagine WebSocket | super+ | speed mode |
 | `grok-imagine-image-pro` | Imagine WebSocket | super+ | quality/pro mode |
+| `grok-imagine-image-quality` | Imagine WebSocket | super+ | quality/pro mode, supports image edits |
 
 ### Image Edit
 
 | Model | Upstream path | Tier |
 | :-- | :-- | :-- |
 | `grok-imagine-image-edit` | grok.com app-chat edit flow | super+ |
+| `grok-imagine-image-quality` | Imagine image edit flow | super+ |
 
 ### Video
 
 | Model | Upstream path | Tier |
 | :-- | :-- | :-- |
 | `grok-imagine-video` | grok.com media API | super+ |
+| `grok-imagine-video-1.5` | grok.com media API | super+ |
 
 ## API Examples
 
@@ -198,7 +203,7 @@ curl http://localhost:8000/v1/images/generations \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
   -d '{
-    "model": "grok-imagine-image",
+    "model": "grok-imagine-image-quality",
     "prompt": "A cat floating in space, cinematic",
     "n": 1,
     "size": "1024x1024",
@@ -210,7 +215,7 @@ Image parameters:
 
 | Field | Description |
 | :-- | :-- |
-| `model` | `grok-imagine-image-lite`, `grok-imagine-image`, or `grok-imagine-image-pro` |
+| `model` | `grok-imagine-image-lite`, `grok-imagine-image`, `grok-imagine-image-pro`, or `grok-imagine-image-quality` |
 | `n` | `1-4` for lite, `1-10` for other image models |
 | `size` | `1280x720`, `720x1280`, `1792x1024`, `1024x1792`, `1024x1024` |
 | `response_format` | `url` or `b64_json` |
@@ -233,7 +238,7 @@ curl http://localhost:8000/v1/images/edits \
 ```bash
 curl http://localhost:8000/v1/videos \
   -H "Authorization: Bearer $GROK2API_API_KEY" \
-  -F "model=grok-imagine-video" \
+  -F "model=grok-imagine-video-1.5" \
   -F "prompt=A neon rainy street at night, cinematic slow tracking shot" \
   -F "seconds=10" \
   -F "size=1792x1024" \
@@ -256,6 +261,7 @@ Video parameters:
 
 | Field | Description |
 | :-- | :-- |
+| `model` | `grok-imagine-video` or `grok-imagine-video-1.5` |
 | `seconds` | `6`, `10`, `12`, `16`, `20` |
 | `size` | `720x1280`, `1280x720`, `1024x1024`, `1024x1792`, `1792x1024` |
 | `resolution_name` | `480p` or `720p` |
