@@ -18,7 +18,7 @@ import random
 from typing import Literal
 
 from app.platform.config.snapshot import get_config
-from ..shared.enums import PoolId
+from ..shared.enums import ModeId, PoolId
 from .table import AccountRuntimeTable
 
 # Scoring weights used by the quota strategy.
@@ -95,10 +95,12 @@ def select_any(
     prefer_tag_idxs: set[int] | None    = None,
     now_s: int,
     ignore_cooling: bool = False,
+    quota_mode_id: int | None = None,
 ) -> int | None:
-    """Select any active account in ``pool_id`` irrespective of per-mode quota.
+    """Select any active account in ``pool_id``.
 
-    Used by WebSocket-based products that manage their own rate limiting.
+    Used by WebSocket-based products that manage their own rate limiting. When
+    ``quota_mode_id`` is set, candidates must also have local quota for that mode.
     """
     if _STRATEGY_NAME == "random":
         return _random_select(
@@ -107,6 +109,7 @@ def select_any(
             prefer_tag_idxs=prefer_tag_idxs,
             now_s=now_s,
             ignore_cooling=ignore_cooling,
+            quota_mode_id=quota_mode_id,
         )
     return _quota_select_any(
         table, pool_id,
@@ -114,6 +117,7 @@ def select_any(
         prefer_tag_idxs=prefer_tag_idxs,
         now_s=now_s,
         ignore_cooling=ignore_cooling,
+        quota_mode_id=quota_mode_id,
     )
 
 
@@ -167,10 +171,23 @@ def _quota_select_any(
     prefer_tag_idxs: set[int] | None,
     now_s: int,
     ignore_cooling: bool = False,
+    quota_mode_id: int | None = None,
 ) -> int | None:
     candidates: set[int] = _pool_union(table, pool_id)
     if not candidates:
         return None
+
+    quota_col: "array.array | None" = None
+    if quota_mode_id is not None:
+        reset_col  = table._reset_col(quota_mode_id)
+        quota_col  = table._quota_col(quota_mode_id)
+        total_col  = table._total_col(quota_mode_id)
+        window_col = table._window_col(quota_mode_id)
+        _maybe_reset_windows(
+            table, candidates, quota_mode_id,
+            reset_col, quota_col, total_col, window_col,
+            pool_id, now_s,
+        )
 
     working = candidates.copy()
     if exclude_idxs:
@@ -178,6 +195,8 @@ def _quota_select_any(
     if not ignore_cooling:
         cooling_col = table.cooling_until_s_by_idx
         working = {idx for idx in working if int(cooling_col[idx]) <= now_s}
+    if quota_col is not None:
+        working = {idx for idx in working if int(quota_col[idx]) > 0}
     if not working:
         return None
 
@@ -185,6 +204,8 @@ def _quota_select_any(
         preferred = working & prefer_tag_idxs
         working = preferred if preferred else working
 
+    if quota_col is not None:
+        return _best(table, working, quota_col, now_s)
     return _best_no_quota(table, working, now_s)
 
 
@@ -199,8 +220,8 @@ def _maybe_reset_windows(
     pool_id: int,
     now_s: int,
 ) -> None:
-    """Reset expired windows for basic-pool accounts inline (no API call needed)."""
-    if pool_id != int(PoolId.BASIC):
+    """Reset expired local windows inline without an upstream quota call."""
+    if pool_id != int(PoolId.BASIC) and mode_id != int(ModeId.CONSOLE):
         return
 
     for idx in list(candidates):
@@ -303,10 +324,23 @@ def _random_select(
     prefer_tag_idxs: set[int] | None,
     now_s: int,
     ignore_cooling: bool = False,
+    quota_mode_id: int | None = None,
 ) -> int | None:
     candidates: set[int] = _pool_union(table, pool_id)
     if not candidates:
         return None
+
+    quota_col: "array.array | None" = None
+    if quota_mode_id is not None:
+        reset_col  = table._reset_col(quota_mode_id)
+        quota_col  = table._quota_col(quota_mode_id)
+        total_col  = table._total_col(quota_mode_id)
+        window_col = table._window_col(quota_mode_id)
+        _maybe_reset_windows(
+            table, candidates, quota_mode_id,
+            reset_col, quota_col, total_col, window_col,
+            pool_id, now_s,
+        )
 
     max_inflight = int(get_config("account.selection.max_inflight", 8))
     cooling_col  = table.cooling_until_s_by_idx
@@ -320,6 +354,8 @@ def _random_select(
         if (ignore_cooling or int(cooling_col[idx]) <= now_s)
         and int(inflight_col[idx]) < max_inflight
     }
+    if quota_col is not None:
+        working = {idx for idx in working if int(quota_col[idx]) > 0}
     if not working:
         return None
 

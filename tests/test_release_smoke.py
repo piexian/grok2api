@@ -37,11 +37,13 @@ from app.control.model.registry import resolve
 from app.dataplane.account import AccountDirectory
 from app.dataplane.account.selector import current_strategy, set_strategy
 from app.main import app
-from app.platform.errors import UpstreamError
+from app.platform.errors import UpstreamError, ValidationError
 from app.platform.meta import get_project_version
 from app.platform.startup import run_account_backfill_migrations
 from app.platform.update_check import _is_newer
 from app.products.openai.router import _available_pools
+from app.products.openai.router import _parse_videos_create_request
+from app.products.openai import video as video_service
 from app.products.web.admin.batch import _prioritize_refresh_tokens
 
 
@@ -520,7 +522,93 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 set_strategy(previous)
                 await repo.close()
 
-    async def test_console_success_sync_records_usage_without_local_quota_decrement(self):
+    async def test_console_reserve_any_uses_console_quota(self):
+        previous = current_strategy()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            try:
+                await repo.upsert_accounts(
+                    [
+                        AccountUpsert(token="tok_console_empty", pool="basic"),
+                        AccountUpsert(token="tok_console_available", pool="basic"),
+                    ]
+                )
+                await repo.patch_accounts(
+                    [
+                        AccountPatch(
+                            token="tok_console_empty",
+                            quota_console={
+                                "remaining": 0,
+                                "total": 20,
+                                "window_seconds": 3600,
+                                "reset_at": None,
+                                "synced_at": None,
+                                "source": int(QuotaSource.DEFAULT),
+                            },
+                        )
+                    ]
+                )
+
+                directory = AccountDirectory(repo)
+                await directory.bootstrap()
+                for strategy in ("quota", "random"):
+                    set_strategy(strategy)
+                    lease = await directory.reserve_any(
+                        (0,),
+                        console_model="grok-4.3",
+                        now_s_override=1000,
+                    )
+                    self.assertIsNotNone(lease)
+                    self.assertEqual(lease.token, "tok_console_available")
+                    await directory.release(lease)
+                    await directory.feedback(
+                        lease.token,
+                        FeedbackKind.SUCCESS,
+                        int(ModeId.CONSOLE),
+                        now_s_val=1001,
+                        console_model="grok-4.3",
+                    )
+
+                table = directory._table
+                idx_empty = table.idx_by_token["tok_console_empty"]
+                idx_available = table.idx_by_token["tok_console_available"]
+                self.assertEqual(table.quota_console_by_idx[idx_empty], 0)
+                self.assertEqual(table.quota_console_by_idx[idx_available], 18)
+            finally:
+                set_strategy(previous)
+                await repo.close()
+
+    async def test_console_rate_limit_can_exhaust_local_quota(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = LocalAccountRepository(Path(tmp) / "accounts.db")
+            await repo.initialize()
+            try:
+                await repo.upsert_accounts(
+                    [AccountUpsert(token="tok_console_limited", pool="basic")]
+                )
+                directory = AccountDirectory(repo)
+                await directory.bootstrap()
+                exc = UpstreamError("free limit", status=429)
+                exc.details["console"] = {"free_limit": True}
+
+                await directory.feedback(
+                    "tok_console_limited",
+                    FeedbackKind.RATE_LIMITED,
+                    int(ModeId.CONSOLE),
+                    now_s_val=1000,
+                    console_model="grok-4.3",
+                    upstream_error=exc,
+                )
+
+                table = directory._table
+                idx = table.idx_by_token["tok_console_limited"]
+                self.assertEqual(table.quota_console_by_idx[idx], 0)
+                self.assertEqual(table.reset_console_at_by_idx[idx], 4600)
+            finally:
+                await repo.close()
+
+    async def test_console_success_sync_records_usage_with_local_quota_decrement(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = LocalAccountRepository(Path(tmp) / "accounts.db")
             await repo.initialize()
@@ -552,12 +640,138 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 record = (await repo.get_accounts(["tok_console_timer"]))[0]
                 console = record.quota_set().console
                 self.assertIsNotNone(console)
-                self.assertEqual(console.remaining, 17)
+                self.assertEqual(console.remaining, 16)
                 self.assertIsNone(console.reset_at)
                 self.assertEqual(record.usage_use_count, 1)
                 self.assertIsNotNone(record.last_use_at)
             finally:
                 await repo.close()
+
+    async def test_video_job_openai_shape_list_and_delete(self):
+        async with video_service._VIDEO_JOBS_LOCK:
+            video_service._VIDEO_JOBS.clear()
+
+        try:
+            await video_service._put_video_job(
+                video_service._VideoJob(
+                    id="video_smoke_1",
+                    model="grok-imagine-video",
+                    prompt="test one",
+                    seconds="6",
+                    size="720x1280",
+                    quality="standard",
+                    created_at=100,
+                    status="completed",
+                    progress=100,
+                    completed_at=120,
+                    expires_at=3720,
+                )
+            )
+            await video_service._put_video_job(
+                video_service._VideoJob(
+                    id="video_smoke_2",
+                    model="grok-imagine-video",
+                    prompt="test two",
+                    seconds="10",
+                    size="1280x720",
+                    quality="standard",
+                    created_at=200,
+                    expires_at=3800,
+                )
+            )
+
+            body = await video_service.retrieve("video_smoke_1")
+            self.assertEqual(body["object"], "video")
+            self.assertEqual(body["status"], "completed")
+            self.assertEqual(body["seconds"], "6")
+            self.assertEqual(body["expires_at"], 3720)
+
+            page = await video_service.list_videos(limit=1, order="asc")
+            self.assertEqual(page["object"], "list")
+            self.assertEqual(page["first_id"], "video_smoke_1")
+            self.assertEqual(page["last_id"], "video_smoke_1")
+            self.assertTrue(page["has_more"])
+
+            next_page = await video_service.list_videos(
+                limit=10,
+                after="video_smoke_1",
+                order="asc",
+            )
+            self.assertEqual(
+                [item["id"] for item in next_page["data"]],
+                ["video_smoke_2"],
+            )
+
+            deleted = await video_service.delete_video("video_smoke_1")
+            self.assertEqual(
+                deleted,
+                {"id": "video_smoke_1", "object": "video.deleted", "deleted": True},
+            )
+            with self.assertRaises(ValidationError):
+                await video_service.retrieve("video_smoke_1")
+        finally:
+            async with video_service._VIDEO_JOBS_LOCK:
+                video_service._VIDEO_JOBS.clear()
+
+    async def test_video_content_supports_thumbnail_variant(self):
+        async with video_service._VIDEO_JOBS_LOCK:
+            video_service._VIDEO_JOBS.clear()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thumbnail_path = Path(tmp) / "thumb.jpg"
+            thumbnail_path.write_bytes(b"thumbnail")
+            try:
+                await video_service._put_video_job(
+                    video_service._VideoJob(
+                        id="video_thumb",
+                        model="grok-imagine-video",
+                        prompt="test",
+                        seconds="6",
+                        size="720x1280",
+                        quality="standard",
+                        created_at=100,
+                        status="completed",
+                        progress=100,
+                        thumbnail_path=str(thumbnail_path),
+                        thumbnail_mime="image/jpeg",
+                    )
+                )
+
+                path = await video_service.content_path(
+                    "video_thumb",
+                    variant="thumbnail",
+                )
+                self.assertEqual(path, thumbnail_path)
+            finally:
+                async with video_service._VIDEO_JOBS_LOCK:
+                    video_service._VIDEO_JOBS.clear()
+
+    async def test_video_content_rejects_unavailable_spritesheet_variant(self):
+        with self.assertRaises(ValidationError) as ctx:
+            await video_service.content_path("video_missing", variant="spritesheet")
+        self.assertEqual(ctx.exception.param, "variant")
+
+    async def test_video_create_json_parser_preserves_input_reference(self):
+        class FakeRequest:
+            headers = {"content-type": "application/json; charset=utf-8"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video",
+                    "prompt": "make a video",
+                    "seconds": "6",
+                    "input_reference": {"image_url": "https://example.test/a.png"},
+                }
+
+        payload = await _parse_videos_create_request(FakeRequest())
+
+        self.assertEqual(payload["model"], "grok-imagine-video")
+        self.assertEqual(payload["prompt"], "make a video")
+        self.assertEqual(payload["seconds"], "6")
+        self.assertEqual(
+            payload["input_references"],
+            {"image_url": "https://example.test/a.png"},
+        )
 
     async def test_admin_tokens_includes_console_quota(self):
         with tempfile.TemporaryDirectory() as tmp:

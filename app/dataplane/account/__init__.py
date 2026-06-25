@@ -18,7 +18,7 @@ from .lease import AccountLease, new_lease
 from .selector import current_strategy, select, select_any
 from .sync import bootstrap as _bootstrap, apply_changes
 from . import feedback as fb
-from ..shared.enums import POOL_ID_TO_STR, StatusId
+from ..shared.enums import ModeId, POOL_ID_TO_STR, StatusId
 
 if TYPE_CHECKING:
     pass
@@ -160,9 +160,11 @@ class AccountDirectory:
         now_s_override: int | None = None,
         console_model: str | None = None,
     ) -> AccountLease | None:
-        """Select any active account from pool_candidates without mode quota checking.
+        """Select any active account from pool_candidates.
 
         Used for WebSocket-based operations that manage their own upstream rate limiting.
+        Console callers pass ``console_model`` to apply the local console quota
+        window while keeping console-specific cooldown behaviour.
         Returns an AccountLease with mode_id=-1 (no specific mode is tracked).
         """
         table = self._table
@@ -201,6 +203,7 @@ class AccountDirectory:
 
         async with self._lock:
             idx: int | None = None
+            quota_mode_id = int(ModeId.CONSOLE) if console_model else None
             for pool_id in pools:
                 idx = select_any(
                     table,
@@ -209,6 +212,7 @@ class AccountDirectory:
                     prefer_tag_idxs=prefer_tag_idxs,
                     now_s=ts,
                     ignore_cooling=bool(console_model),
+                    quota_mode_id=quota_mode_id,
                 )
                 if idx is not None:
                     break
@@ -269,7 +273,7 @@ class AccountDirectory:
 
         async with self._lock:
             if console_model and kind == FeedbackKind.SUCCESS:
-                fb.apply_success_random(table, idx)
+                fb.apply_success_console(table, idx)
                 increment_global_success = True
 
             elif kind == FeedbackKind.SUCCESS:
@@ -287,7 +291,12 @@ class AccountDirectory:
                     ts + cooldown_sec,
                     team_scoped=team_scoped,
                 )
-                fb.apply_rate_limited_console(table, idx)
+                quota_reset_s = (
+                    ts + cooldown_sec
+                    if cooldown_sec >= _CONSOLE_QUOTA_EXHAUST_COOLDOWN_SEC
+                    else None
+                )
+                fb.apply_rate_limited_console(table, idx, reset_s=quota_reset_s)
                 fb.update_last_fail(table, idx, ts)
                 logger.info(
                     "console cooldown applied: model={} token={}... scope={} cooldown_sec={}",
@@ -401,6 +410,7 @@ _POOL_INTERVAL_CONFIG: dict[str, tuple[str, int]] = {
     "super": ("account.refresh.super_interval_sec", 7_200),
     "heavy": ("account.refresh.heavy_interval_sec", 7_200),
 }
+_CONSOLE_QUOTA_EXHAUST_COOLDOWN_SEC = 3_600
 
 
 def _pool_cooling_sec(pool_id: int) -> int:

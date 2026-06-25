@@ -3,7 +3,7 @@
 import base64
 import binascii
 import mimetypes
-from typing import Annotated, AsyncGenerator, AsyncIterable, Literal
+from typing import Annotated, Any, AsyncGenerator, AsyncIterable
 
 import orjson
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -435,39 +435,144 @@ async def image_generations(req: ImageGenerationRequest):
 # /v1/videos (OpenAI videos.create surface)
 # ---------------------------------------------------------------------------
 
+_VIDEO_FORM_CONTENT_TYPES = {"multipart/form-data", "application/x-www-form-urlencoded"}
+
+
+def _normalized_content_type(request: Request) -> str:
+    return (
+        request.headers.get("content-type", "")
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+    )
+
+
+def _required_text(value: object | None, *, param: str) -> str:
+    if value is None:
+        raise ValidationError(f"{param} is required", param=param)
+    text = str(value).strip()
+    if not text:
+        raise ValidationError(f"{param} cannot be empty", param=param)
+    return text
+
+
+def _optional_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _is_upload_file(value: object) -> bool:
+    return (
+        hasattr(value, "read")
+        and hasattr(value, "filename")
+        and hasattr(value, "content_type")
+    )
+
+
+async def _parse_json_video_request(request: Request) -> dict[str, Any]:
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise ValidationError("Request body must be valid JSON", param="body") from exc
+    if not isinstance(body, dict):
+        raise ValidationError("Request body must be a JSON object", param="body")
+
+    return {
+        "model": _required_text(body.get("model"), param="model"),
+        "prompt": _required_text(body.get("prompt"), param="prompt"),
+        "seconds": body.get("seconds"),
+        "size": _optional_text(body.get("size")),
+        "resolution_name": _optional_text(body.get("resolution_name")),
+        "preset": _optional_text(body.get("preset")),
+        "input_references": body.get("input_reference"),
+    }
+
+
+def _form_first(form: Any, name: str) -> object | None:
+    values = form.getlist(name)
+    return values[0] if values else None
+
+
+async def _parse_form_video_references(form: Any) -> list[dict[str, str]] | None:
+    references: list[dict[str, str]] = []
+    for name in ("input_reference", "input_reference[]"):
+        for value in form.getlist(name):
+            if len(references) >= 7:
+                return references
+            if _is_upload_file(value):
+                references.append(
+                    {
+                        "image_url": await _upload_to_data_uri(
+                            value,  # type: ignore[arg-type]
+                            param="input_reference",
+                        )
+                    }
+                )
+                continue
+            image_url = _optional_text(value)
+            if image_url:
+                references.append({"image_url": image_url})
+    return references or None
+
+
+async def _parse_form_video_request(request: Request) -> dict[str, Any]:
+    form = await request.form()
+    return {
+        "model": _required_text(_form_first(form, "model"), param="model"),
+        "prompt": _required_text(_form_first(form, "prompt"), param="prompt"),
+        "seconds": _form_first(form, "seconds"),
+        "size": _optional_text(_form_first(form, "size")),
+        "resolution_name": _optional_text(_form_first(form, "resolution_name")),
+        "preset": _optional_text(_form_first(form, "preset")),
+        "input_references": await _parse_form_video_references(form),
+    }
+
+
+async def _parse_videos_create_request(request: Request) -> dict[str, Any]:
+    content_type = _normalized_content_type(request)
+    if (
+        not content_type
+        or content_type == "application/json"
+        or content_type.endswith("+json")
+    ):
+        return await _parse_json_video_request(request)
+    if content_type in _VIDEO_FORM_CONTENT_TYPES:
+        return await _parse_form_video_request(request)
+    raise ValidationError(
+        "Content-Type must be application/json or multipart/form-data",
+        param="content_type",
+    )
+
 
 @router.post("/videos", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
-async def videos_create(
-    model: Annotated[str, Form(...)],
-    prompt: Annotated[str, Form(...)],
-    seconds: Annotated[int, Form()] = 6,
-    size: Annotated[Literal["720x1280", "1280x720", "1024x1024", "1024x1792", "1792x1024"],
-                    Form()] = "720x1280",
-    resolution_name: Annotated[Literal["480p", "720p"] | None, Form()] = None,
-    preset: Annotated[Literal["fun", "normal", "spicy", "custom"] | None,
-                      Form()] = None,
-    input_reference: Annotated[list[UploadFile] | None, File(alias="input_reference[]")] = None,
-):
+async def videos_create(request: Request):
     from .video import create_video
 
-    references_payload = None
-    if input_reference:
-        references_payload = [
-            {
-                "image_url": await _upload_to_data_uri(f, param="input_reference")
-            } for f in input_reference[:7]
-        ]
+    payload = await _parse_videos_create_request(request)
 
     result = await create_video(
-        model=model or "grok-video",
-        prompt=prompt,
-        seconds=seconds,
-        size=size or "720x1280",
-        resolution_name=resolution_name,
-        preset=preset,
-        input_references=references_payload,
+        model=payload["model"],
+        prompt=payload["prompt"],
+        seconds=payload.get("seconds"),
+        size=payload.get("size"),
+        resolution_name=payload.get("resolution_name"),
+        preset=payload.get("preset"),
+        input_references=payload.get("input_references"),
     )
     return JSONResponse(result)
+
+
+@router.get("/videos", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
+async def videos_list(
+    limit: int = Query(20, ge=1, le=100),
+    after: str | None = Query(None),
+    order: str = Query("desc"),
+):
+    from .video import list_videos
+
+    return JSONResponse(await list_videos(limit=limit, after=after, order=order))
 
 
 @router.get("/videos/{video_id}", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
@@ -482,11 +587,25 @@ async def videos_retrieve(video_id: str):
     tags=[_TAG_VIDEOS],
     dependencies=[Depends(verify_api_key)],
 )
-async def videos_content(video_id: str):
+async def videos_content(video_id: str, variant: str = Query("video")):
     from .video import content_path
 
-    path = await content_path(video_id)
+    path = await content_path(video_id, variant=variant)
+    if variant == "thumbnail":
+        media_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=f"{video_id}{path.suffix}",
+        )
     return FileResponse(path, media_type="video/mp4", filename=f"{video_id}.mp4")
+
+
+@router.delete("/videos/{video_id}", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
+async def videos_delete(video_id: str):
+    from .video import delete_video
+
+    return JSONResponse(await delete_video(video_id))
 
 
 # ---------------------------------------------------------------------------

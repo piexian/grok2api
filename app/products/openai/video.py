@@ -27,7 +27,7 @@ from app.platform.errors import (
 )
 from app.platform.logging.logger import logger
 from app.platform.runtime.clock import now_s
-from app.platform.storage import save_local_video
+from app.platform.storage import image_files_dir, save_local_image, save_local_video
 from app.control.account.enums import FeedbackKind
 from app.control.model import registry as model_registry
 from app.control.model.registry import resolve as resolve_model
@@ -104,9 +104,13 @@ class _VideoJob:
     status: str = "queued"
     progress: int = 0
     completed_at: int | None = None
+    expires_at: int | None = None
     error: dict[str, Any] | None = None
     remixed_from_video_id: str | None = None
     video_url: str = ""
+    thumbnail_url: str = ""
+    thumbnail_path: str = ""
+    thumbnail_mime: str = ""
     content_path: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,6 +128,8 @@ class _VideoJob:
         }
         if self.completed_at is not None:
             payload["completed_at"] = self.completed_at
+        if self.expires_at is not None:
+            payload["expires_at"] = self.expires_at
         if self.error is not None:
             payload["error"] = self.error
         if self.remixed_from_video_id:
@@ -562,7 +568,12 @@ async def _collect_video_segment(
     )
 
 
-async def _download_video_bytes(token: str, url: str) -> tuple[bytes, str]:
+async def _download_media_bytes(
+    token: str,
+    url: str,
+    *,
+    default_mime: str,
+) -> tuple[bytes, str]:
     try:
         stream, content_type = await download_asset(token, url)
         chunks: list[bytes] = []
@@ -571,17 +582,38 @@ async def _download_video_bytes(token: str, url: str) -> tuple[bytes, str]:
     except UpstreamError:
         raise
     except Exception as exc:
-        raise UpstreamError(f"Video download failed: {exc}") from exc
+        raise UpstreamError(f"Media download failed: {exc}") from exc
     raw = b"".join(chunks)
     if not raw:
-        raise UpstreamError("Video download returned empty content", status=502)
+        raise UpstreamError("Media download returned empty content", status=502)
     if raw.lstrip()[:1] in {b"<", b"{"}:
-        raise UpstreamError("Video download returned non-video content", status=502)
-    return raw, (content_type or "video/mp4")
+        raise UpstreamError("Media download returned non-binary content", status=502)
+    return raw, (content_type or default_mime)
+
+
+async def _download_video_bytes(token: str, url: str) -> tuple[bytes, str]:
+    return await _download_media_bytes(token, url, default_mime="video/mp4")
+
+
+async def _download_thumbnail_bytes(token: str, url: str) -> tuple[bytes, str]:
+    raw, mime = await _download_media_bytes(token, url, default_mime="image/jpeg")
+    normalized_mime = mime.split(";", 1)[0].strip().lower()
+    if normalized_mime not in {"image/jpeg", "image/jpg", "image/png"}:
+        raise UpstreamError(f"Unsupported thumbnail content type: {mime}")
+    return raw, normalized_mime
 
 
 def _save_video_bytes(raw: bytes, file_id: str) -> Path:
     return save_local_video(raw, file_id)
+
+
+def _save_thumbnail_bytes(raw: bytes, mime: str, file_id: str) -> tuple[Path, str]:
+    normalized_mime = mime.split(";", 1)[0].strip().lower()
+    media_type = "image/png" if normalized_mime == "image/png" else "image/jpeg"
+    suffix = ".png" if media_type == "image/png" else ".jpg"
+    thumbnail_id = f"{file_id}_thumbnail"
+    save_local_image(raw, media_type, thumbnail_id)
+    return image_files_dir() / f"{thumbnail_id}{suffix}", media_type
 
 
 def _local_video_url(file_id: str) -> str:
@@ -803,6 +835,46 @@ async def get_video_job(video_id: str) -> _VideoJob | None:
         return _VIDEO_JOBS.get(video_id)
 
 
+async def list_videos(
+    *, limit: int = 20, after: str | None = None, order: str = "desc"
+) -> dict[str, Any]:
+    if not (1 <= limit <= 100):
+        raise ValidationError("limit must be between 1 and 100", param="limit")
+    if order not in {"asc", "desc"}:
+        raise ValidationError("order must be one of [asc, desc]", param="order")
+
+    async with _VIDEO_JOBS_LOCK:
+        jobs = sorted(
+            _VIDEO_JOBS.values(),
+            key=lambda item: (item.created_at, item.id),
+            reverse=order == "desc",
+        )
+
+    if after:
+        try:
+            cursor_idx = next(index for index, job in enumerate(jobs) if job.id == after)
+            jobs = jobs[cursor_idx + 1:]
+        except StopIteration:
+            jobs = []
+
+    page = jobs[:limit]
+    return {
+        "object": "list",
+        "data": [job.to_dict() for job in page],
+        "first_id": page[0].id if page else None,
+        "last_id": page[-1].id if page else None,
+        "has_more": len(jobs) > limit,
+    }
+
+
+async def delete_video(video_id: str) -> dict[str, Any]:
+    async with _VIDEO_JOBS_LOCK:
+        job = _VIDEO_JOBS.pop(video_id, None)
+    if job is None:
+        raise ValidationError(f"Video {video_id!r} not found", param="video_id")
+    return {"id": video_id, "object": "video.deleted", "deleted": True}
+
+
 async def _expire_video_job(video_id: str, ttl_s: int = _VIDEO_JOB_TTL_S) -> None:
     await asyncio.sleep(ttl_s)
     async with _VIDEO_JOBS_LOCK:
@@ -832,6 +904,8 @@ async def _run_video_job(
     preset: str | None,
     input_references: list[dict[str, Any]] | None = None,
 ) -> None:
+    thumbnail_raw: bytes | None = None
+    thumbnail_mime = ""
     try:
         await _set_job_status(job, status="in_progress", progress=1)
         aspect_ratio, default_resolution_name = _resolve_video_size(size)
@@ -879,6 +953,18 @@ async def _run_video_job(
                 progress_cb=_progress,
             )
             raw, _mime = await _download_video_bytes(token, artifact.video_url)
+            if artifact.thumbnail_url:
+                try:
+                    thumbnail_raw, thumbnail_mime = await _download_thumbnail_bytes(
+                        token,
+                        artifact.thumbnail_url,
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "video thumbnail download skipped: job_id={} error={}",
+                        job.id,
+                        exc,
+                    )
             success = True
         except BaseException as exc:
             fail_exc = exc
@@ -899,11 +985,24 @@ async def _run_video_job(
                 asyncio.create_task(_fail_sync(token, int(spec.mode_id), fail_exc))
 
         path = _save_video_bytes(raw, job.id)
+        thumbnail_path = ""
+        saved_thumbnail_mime = ""
+        if thumbnail_raw is not None:
+            thumbnail_file, saved_thumbnail_mime = _save_thumbnail_bytes(
+                thumbnail_raw,
+                thumbnail_mime,
+                job.id,
+            )
+            thumbnail_path = str(thumbnail_file)
         async with _VIDEO_JOBS_LOCK:
             job.status = "completed"
             job.progress = 100
             job.completed_at = int(time.time())
+            job.expires_at = job.completed_at + _VIDEO_JOB_TTL_S
             job.video_url = artifact.video_url
+            job.thumbnail_url = artifact.thumbnail_url
+            job.thumbnail_path = thumbnail_path
+            job.thumbnail_mime = saved_thumbnail_mime
             job.content_path = str(path)
             job.remixed_from_video_id = artifact.remixed_from_video_id
     except Exception as exc:
@@ -911,6 +1010,9 @@ async def _run_video_job(
         async with _VIDEO_JOBS_LOCK:
             job.status = "failed"
             job.error = _job_error_payload(_exception_message(exc))
+            job.expires_at = int(time.time()) + _VIDEO_JOB_TTL_S
+    finally:
+        asyncio.create_task(_expire_video_job(job.id))
 
 
 async def create_video(
@@ -921,7 +1023,7 @@ async def create_video(
     size: str | None = None,
     resolution_name: str | None = None,
     preset: str | None = None,
-    input_references: list[dict[str, Any]] | None = None,
+    input_references: list[dict[str, Any]] | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_video():
@@ -937,6 +1039,8 @@ async def create_video(
     _aspect_ratio, default_resolution_name = _resolve_video_size(normalized_size)
     _resolve_video_resolution_name(resolution_name, default=default_resolution_name)
     _resolve_video_preset(preset)
+    normalized_input_references = _normalize_input_references(input_references)
+    created_at = int(time.time())
 
     job = _VideoJob(
         id=f"video_{uuid.uuid4().hex}",
@@ -945,7 +1049,8 @@ async def create_video(
         seconds=str(normalized_seconds),
         size=normalized_size,
         quality=_VIDEO_QUALITY,
-        created_at=int(time.time()),
+        created_at=created_at,
+        expires_at=created_at + _VIDEO_JOB_TTL_S,
     )
     await _put_video_job(job)
     asyncio.create_task(
@@ -956,10 +1061,9 @@ async def create_video(
             prompt=cleaned_prompt,
             seconds=normalized_seconds,
             preset=preset,
-            input_references=input_references,
+            input_references=normalized_input_references,
         )
     )
-    asyncio.create_task(_expire_video_job(job.id))
     return job.to_dict()
 
 
@@ -970,18 +1074,58 @@ async def retrieve(video_id: str) -> dict[str, Any]:
     return job.to_dict()
 
 
-async def content_path(video_id: str) -> Path:
+def _normalize_input_references(
+    input_references: list[dict[str, Any]] | dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    if input_references is None:
+        return None
+    refs = [input_references] if isinstance(input_references, dict) else input_references
+    if not isinstance(refs, list):
+        raise ValidationError(
+            "input_reference must be an object or array",
+            param="input_reference",
+        )
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(refs):
+        if not isinstance(item, dict):
+            raise ValidationError(
+                "input_reference items must be objects",
+                param=f"input_reference.{index}",
+            )
+        normalized.append(item)
+    return normalized[:7] or None
+
+
+async def content_path(video_id: str, *, variant: str = "video") -> Path:
+    if variant == "spritesheet":
+        raise ValidationError(
+            "variant 'spritesheet' is not available",
+            param="variant",
+        )
+    if variant not in {"video", "thumbnail"}:
+        raise ValidationError(
+            "variant must be one of [video, thumbnail, spritesheet]",
+            param="variant",
+        )
     job = await get_video_job(video_id)
     if job is None:
         raise ValidationError(f"Video {video_id!r} not found", param="video_id")
-    if job.status != "completed" or not job.content_path:
+
+    selected_path = job.thumbnail_path if variant == "thumbnail" else job.content_path
+    if job.status != "completed" or not selected_path:
+        code = "video_thumbnail_not_ready" if variant == "thumbnail" else "video_not_ready"
+        message = (
+            "Video thumbnail is not ready yet"
+            if variant == "thumbnail"
+            else "Video content is not ready yet"
+        )
         raise AppError(
-            "Video content is not ready yet",
+            message,
             kind=ErrorKind.VALIDATION,
-            code="video_not_ready",
+            code=code,
             status=409,
         )
-    path = Path(job.content_path)
+    path = Path(selected_path)
     if not path.exists():
         raise ValidationError(
             f"Video content for {video_id!r} not found", param="video_id"
@@ -1138,6 +1282,8 @@ async def completions(
 __all__ = [
     "create_video",
     "retrieve",
+    "list_videos",
+    "delete_video",
     "content_path",
     "validate_video_length",
     "completions",

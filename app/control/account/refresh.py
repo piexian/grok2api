@@ -288,7 +288,9 @@ class AccountRefreshService:
         if record is None or record.is_deleted():
             return
         if mode_id == 5:
-            await self.record_success_async(token)
+            await self._apply_single_mode(
+                record, mode_id, None, is_use=True, use_at_ms=now_ms()
+            )
             return
         try:
             window = await self._fetch_mode_quota(token, record.pool, mode_id)
@@ -300,9 +302,20 @@ class AccountRefreshService:
             record, mode_id, window, is_use=True, use_at_ms=now_ms()
         )
 
-    async def record_success_async(self, token: str) -> None:
-        """Persist use counters without touching upstream quota windows."""
+    async def record_success_async(
+        self, token: str, mode_id: int | None = None
+    ) -> None:
+        """Persist use counters and local-only quota windows after success."""
         from .commands import AccountPatch
+
+        if mode_id == 5:
+            record = (await self._repo.get_accounts([token]) or [None])[0]
+            if record is None or record.is_deleted():
+                return
+            await self._apply_single_mode(
+                record, mode_id, None, is_use=True, use_at_ms=now_ms()
+            )
+            return
 
         await self._repo.patch_accounts(
             [

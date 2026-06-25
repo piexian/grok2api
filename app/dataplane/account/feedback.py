@@ -11,7 +11,7 @@ selector strategy. No runtime ``if`` inside the apply helpers themselves.
 """
 
 from app.platform.runtime.clock import now_s
-from ..shared.enums import ALL_MODE_IDS, StatusId
+from ..shared.enums import ALL_MODE_IDS, ModeId, StatusId
 from .table import AccountRuntimeTable
 
 # Health adjustment constants.
@@ -41,6 +41,11 @@ def apply_success_random(table: AccountRuntimeTable, idx: int) -> None:
     _bump_health(table, idx)
 
 
+def apply_success_console(table: AccountRuntimeTable, idx: int) -> None:
+    """Console endpoint: decrement the local console window and improve health."""
+    apply_success_quota(table, idx, int(ModeId.CONSOLE))
+
+
 # ---------------------------------------------------------------------------
 # apply_rate_limited — two independent implementations
 # ---------------------------------------------------------------------------
@@ -68,8 +73,18 @@ def apply_rate_limited_random(
     _adjust_health(table, idx, _RATE_LIMIT_FACTOR)
 
 
-def apply_rate_limited_console(table: AccountRuntimeTable, idx: int) -> None:
-    """Console endpoint: reduce health without touching grok.com cooldown/quota."""
+def apply_rate_limited_console(
+    table: AccountRuntimeTable,
+    idx: int,
+    *,
+    reset_s: int | None = None,
+) -> None:
+    """Console endpoint: reduce health and optionally exhaust local quota."""
+    if reset_s is not None:
+        mode_id = int(ModeId.CONSOLE)
+        table._quota_col(mode_id)[idx] = 0
+        reset_col = table._reset_col(mode_id)
+        reset_col[idx] = max(int(reset_col[idx]), reset_s)
     _adjust_health(table, idx, _RATE_LIMIT_FACTOR)
 
 

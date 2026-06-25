@@ -126,7 +126,7 @@ async def _quota_sync(token: str, mode_id: int) -> None:
         if not svc:
             return
         if mode_id == int(ModeId.CONSOLE):
-            await svc.record_success_async(token)
+            await svc.record_success_async(token, mode_id=mode_id)
             return
         if current_strategy() == "quota":
             await svc.refresh_call_async(token, mode_id)
