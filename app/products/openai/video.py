@@ -66,9 +66,23 @@ _VIDEO_SIZE_MAP: dict[str, tuple[str, str]] = {
     "720x1280": ("9:16", "720p"),
     "1280x720": ("16:9", "720p"),
     "1024x1024": ("1:1", "720p"),
+    "1024x768": ("4:3", "720p"),
+    "768x1024": ("3:4", "720p"),
+    "1536x1024": ("3:2", "720p"),
+    "1024x1536": ("2:3", "720p"),
     "1024x1792": ("9:16", "720p"),
     "1792x1024": ("16:9", "720p"),
 }
+_XAI_VIDEO_ASPECT_RATIO_TO_SIZE = {
+    "1:1": "1024x1024",
+    "16:9": "1280x720",
+    "9:16": "720x1280",
+    "4:3": "1024x768",
+    "3:4": "768x1024",
+    "3:2": "1536x1024",
+    "2:3": "1024x1536",
+}
+_XAI_VIDEO_RESOLUTIONS = {"480p", "720p"}
 _PRESET_FLAGS = {
     "fun": "--mode=extremely-crazy",
     "normal": "--mode=normal",
@@ -112,6 +126,7 @@ class _VideoJob:
     thumbnail_path: str = ""
     thumbnail_mime: str = ""
     content_path: str = ""
+    api_style: str = "openai"
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -189,6 +204,33 @@ def _resolve_video_resolution_name(value: str | None, *, default: str = "720p") 
     if normalized not in {"480p", "720p"}:
         raise ValidationError(
             "resolution_name must be one of [480p, 720p]", param="resolution_name"
+        )
+    return normalized
+
+
+def resolve_xai_video_size(aspect_ratio: str | None) -> str | None:
+    if aspect_ratio is None:
+        return None
+    normalized = aspect_ratio.strip().lower()
+    size = _XAI_VIDEO_ASPECT_RATIO_TO_SIZE.get(normalized)
+    if size is None:
+        allowed = ", ".join(sorted(_XAI_VIDEO_ASPECT_RATIO_TO_SIZE))
+        raise ValidationError(
+            f"aspect_ratio must be one of [{allowed}]",
+            param="aspect_ratio",
+        )
+    return size
+
+
+def resolve_xai_video_resolution(resolution: str | None) -> str | None:
+    if resolution is None:
+        return None
+    normalized = resolution.strip().lower()
+    if normalized not in _XAI_VIDEO_RESOLUTIONS:
+        allowed = ", ".join(sorted(_XAI_VIDEO_RESOLUTIONS))
+        raise ValidationError(
+            f"resolution must be one of [{allowed}]",
+            param="resolution",
         )
     return normalized
 
@@ -1024,6 +1066,8 @@ async def create_video(
     resolution_name: str | None = None,
     preset: str | None = None,
     input_references: list[dict[str, Any]] | dict[str, Any] | None = None,
+    api_style: str = "openai",
+    id_prefix: str = "video_",
 ) -> dict[str, Any]:
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_video():
@@ -1043,7 +1087,7 @@ async def create_video(
     created_at = int(time.time())
 
     job = _VideoJob(
-        id=f"video_{uuid.uuid4().hex}",
+        id=f"{id_prefix}{uuid.uuid4().hex}",
         model=model,
         prompt=cleaned_prompt,
         seconds=str(normalized_seconds),
@@ -1051,6 +1095,7 @@ async def create_video(
         quality=_VIDEO_QUALITY,
         created_at=created_at,
         expires_at=created_at + _VIDEO_JOB_TTL_S,
+        api_style=api_style,
     )
     await _put_video_job(job)
     asyncio.create_task(
@@ -1072,6 +1117,36 @@ async def retrieve(video_id: str) -> dict[str, Any]:
     if job is None:
         raise ValidationError(f"Video {video_id!r} not found", param="video_id")
     return job.to_dict()
+
+
+async def retrieve_xai_video(request_id: str) -> dict[str, Any]:
+    job = await get_video_job(request_id)
+    if job is None:
+        return {"status": "expired"}
+    if job.status == "completed":
+        video: dict[str, Any] = {
+            "url": job.video_url,
+            "duration": int(job.seconds),
+            "respect_moderation": True,
+        }
+        return {
+            "status": "done",
+            "video": video,
+            "model": job.model,
+            "progress": 100,
+        }
+    if job.status == "failed":
+        return {
+            "status": "failed",
+            "error": job.error or _job_error_payload("Video generation failed"),
+            "model": job.model,
+            "progress": job.progress,
+        }
+    return {
+        "status": "pending",
+        "model": job.model,
+        "progress": job.progress,
+    }
 
 
 def _normalize_input_references(
@@ -1282,6 +1357,7 @@ async def completions(
 __all__ = [
     "create_video",
     "retrieve",
+    "retrieve_xai_video",
     "list_videos",
     "delete_video",
     "content_path",
@@ -1289,4 +1365,6 @@ __all__ = [
     "completions",
     "_build_segment_lengths",
     "_resolve_video_size",
+    "resolve_xai_video_resolution",
+    "resolve_xai_video_size",
 ]

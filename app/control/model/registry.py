@@ -40,6 +40,7 @@ MODELS: tuple[ModelSpec, ...] = (
     # Super+
     ModelSpec("grok-imagine-image",                     ModeId.AUTO,     Tier.SUPER, Capability.IMAGE,      True, "Grok Imagine Image"),
     ModelSpec("grok-imagine-image-pro",                 ModeId.AUTO,     Tier.SUPER, Capability.IMAGE,      True, "Grok Imagine Image Pro"),
+    ModelSpec("grok-imagine-image-quality",             ModeId.AUTO,     Tier.SUPER, Capability.IMAGE | Capability.IMAGE_EDIT, True, "Grok Imagine Image Quality"),
 
     # === Image Edit =========================================================
 
@@ -50,6 +51,7 @@ MODELS: tuple[ModelSpec, ...] = (
 
     # Super+
     ModelSpec("grok-imagine-video",                     ModeId.AUTO,     Tier.SUPER, Capability.VIDEO,      True, "Grok Imagine Video"),
+    ModelSpec("grok-imagine-video-1.5",                 ModeId.AUTO,     Tier.SUPER, Capability.VIDEO,      True, "Grok Imagine Video 1.5"),
 )
 # fmt: on
 

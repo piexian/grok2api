@@ -164,6 +164,48 @@ _IMAGE_OUTPUT_FORMATS = {"png", "jpeg", "webp"}
 _IMAGE_QUALITY_VALUES = {"auto", "low", "medium", "high", "standard", "hd"}
 _IMAGE_BACKGROUND_VALUES = {"auto", "opaque", "transparent"}
 _IMAGE_MODERATION_VALUES = {"auto", "low"}
+_XAI_IMAGE_ASPECT_RATIOS = {
+    "auto",
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "2:1",
+    "1:2",
+    "19.5:9",
+    "9:19.5",
+    "20:9",
+    "9:20",
+}
+_XAI_IMAGE_RESOLUTIONS = {"1k", "2k"}
+
+
+def normalize_xai_image_aspect_ratio(aspect_ratio: str | None) -> str | None:
+    if aspect_ratio is None:
+        return None
+    normalized = aspect_ratio.strip().lower()
+    if normalized not in _XAI_IMAGE_ASPECT_RATIOS:
+        allowed = ", ".join(sorted(_XAI_IMAGE_ASPECT_RATIOS))
+        raise ValidationError(
+            f"aspect_ratio must be one of [{allowed}]",
+            param="aspect_ratio",
+        )
+    return normalized
+
+
+def validate_xai_image_resolution(resolution: str | None) -> None:
+    if resolution is None:
+        return
+    normalized = resolution.strip().lower()
+    if normalized not in _XAI_IMAGE_RESOLUTIONS:
+        allowed = ", ".join(sorted(_XAI_IMAGE_RESOLUTIONS))
+        raise ValidationError(
+            f"resolution must be one of [{allowed}]",
+            param="resolution",
+        )
 
 
 def normalize_image_response_format(
@@ -195,7 +237,7 @@ def validate_image_output_options(
     *,
     quality: str | None = None,
     output_format: str | None = None,
-    output_compression: int | None = None,
+    output_compression: int | str | None = None,
     background: str | None = None,
     moderation: str | None = None,
 ) -> None:
@@ -204,11 +246,19 @@ def validate_image_output_options(
         raise ValidationError(f"quality must be one of [{allowed}]", param="quality")
     if output_format is not None:
         normalize_image_response_format(output_format=output_format)
-    if output_compression is not None and not (0 <= int(output_compression) <= 100):
-        raise ValidationError(
-            "output_compression must be between 0 and 100",
-            param="output_compression",
-        )
+    if output_compression is not None:
+        try:
+            compression = int(output_compression)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                "output_compression must be an integer",
+                param="output_compression",
+            ) from exc
+        if not (0 <= compression <= 100):
+            raise ValidationError(
+                "output_compression must be between 0 and 100",
+                param="output_compression",
+            )
     if background is not None and background.strip().lower() not in _IMAGE_BACKGROUND_VALUES:
         allowed = ", ".join(sorted(_IMAGE_BACKGROUND_VALUES))
         raise ValidationError(
@@ -319,7 +369,7 @@ def _output_content(image: _ImageOutput, *, chat_format: bool) -> str:
 # Models that use the chat endpoint for image generation (no WS, no params).
 _LITE_IMAGE_MODELS = frozenset({"grok-imagine-image-lite"})
 # WS models that use quality mode (enable_pro=True).
-_PRO_IMAGE_MODELS  = frozenset({"grok-imagine-image-pro"})
+_PRO_IMAGE_MODELS  = frozenset({"grok-imagine-image-pro", "grok-imagine-image-quality"})
 
 
 async def generate(
@@ -331,9 +381,11 @@ async def generate(
     response_format: str | None = None,
     stream:          bool = False,
     chat_format:     bool = False,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
     quality: str | None = None,
     output_format: str | None = None,
-    output_compression: int | None = None,
+    output_compression: int | str | None = None,
     background: str | None = None,
     moderation: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
@@ -350,7 +402,9 @@ async def generate(
     """
     cfg          = get_config()
     spec         = resolve_model(model)
-    aspect_ratio = resolve_aspect_ratio(size)
+    resolved_aspect_ratio = normalize_xai_image_aspect_ratio(aspect_ratio)
+    aspect_ratio = resolved_aspect_ratio or resolve_aspect_ratio(size)
+    validate_xai_image_resolution(resolution)
     enable_nsfw  = cfg.get_bool("features.enable_nsfw", True)
     response_format = normalize_image_response_format(
         response_format,
@@ -1180,9 +1234,11 @@ async def edit(
     response_format: str | None = None,
     stream:          bool = False,
     chat_format:     bool = False,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
     quality: str | None = None,
     output_format: str | None = None,
-    output_compression: int | None = None,
+    output_compression: int | str | None = None,
     background: str | None = None,
     moderation: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
@@ -1193,6 +1249,8 @@ async def edit(
     if not (1 <= n <= _EDIT_MAX_N):
         raise ValidationError("image edit n must be between 1 and 2", param="n")
     _normalize_edit_size(size)
+    normalize_xai_image_aspect_ratio(aspect_ratio)
+    validate_xai_image_resolution(resolution)
     response_format = normalize_image_response_format(
         response_format,
         output_format=output_format,
@@ -1380,6 +1438,8 @@ __all__ = [
     "edit",
     "generate",
     "normalize_image_response_format",
+    "normalize_xai_image_aspect_ratio",
     "resolve_aspect_ratio",
+    "validate_xai_image_resolution",
     "validate_image_output_options",
 ]

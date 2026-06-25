@@ -16,6 +16,8 @@ class MessageItem(BaseModel):
 class ImageConfig(BaseModel):
     n:               int | None = Field(1, ge=1, le=10)
     size:            str | None = "1024x1024"
+    aspect_ratio:    str | None = None
+    resolution:      Literal["1k", "2k"] | None = None
     response_format: str | None = None
     quality:         str | None = None
     output_format:   Literal["png", "jpeg", "webp"] | None = None
@@ -51,6 +53,8 @@ class ImageGenerationRequest(BaseModel):
     prompt:          str
     n:               int | None = Field(1, ge=1, le=10)
     size:            str | None = "1024x1024"
+    aspect_ratio:    str | None = None
+    resolution:      Literal["1k", "2k"] | None = None
     response_format: str | None = None
     quality:         str | None = None
     output_format:   Literal["png", "jpeg", "webp"] | None = None
@@ -65,10 +69,12 @@ class ImageGenerationRequest(BaseModel):
 class ImageEditRequest(BaseModel):
     model:           str
     prompt:          str
-    image:           str | list[str]
+    image:           str | dict[str, Any] | list[str] | list[dict[str, Any]]
     mask:            str | None = None
     n:               int | None = Field(1, ge=1, le=2)
     size:            str | None = "1024x1024"
+    aspect_ratio:    str | None = None
+    resolution:      Literal["1k", "2k"] | None = None
     response_format: str | None = None
     quality:         str | None = None
     output_format:   Literal["png", "jpeg", "webp"] | None = None

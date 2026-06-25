@@ -3,10 +3,10 @@
 import base64
 import binascii
 import mimetypes
-from typing import Annotated, Any, AsyncGenerator, AsyncIterable
+from typing import Any, AsyncGenerator, AsyncIterable
 
 import orjson
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 
 from app.control.account.state_machine import is_manageable
@@ -249,6 +249,8 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 response_format=cfg.response_format,
                 stream=is_stream,
                 chat_format=True,
+                aspect_ratio=cfg.aspect_ratio,
+                resolution=cfg.resolution,
                 quality=cfg.quality,
                 output_format=cfg.output_format,
                 output_compression=cfg.output_compression,
@@ -279,6 +281,8 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 response_format=fmt,
                 stream=is_stream,
                 chat_format=True,
+                aspect_ratio=cfg.aspect_ratio,
+                resolution=cfg.resolution,
                 quality=cfg.quality,
                 output_format=cfg.output_format,
                 output_compression=cfg.output_compression,
@@ -456,6 +460,8 @@ async def image_generations(req: ImageGenerationRequest):
         response_format=req.response_format,
         stream=False,
         chat_format=False,
+        aspect_ratio=req.aspect_ratio,
+        resolution=req.resolution,
         quality=req.quality,
         output_format=req.output_format,
         output_compression=req.output_compression,
@@ -495,6 +501,15 @@ def _optional_text(value: object | None) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _optional_int(value: object | None, *, default: int, param: str) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{param} must be an integer", param=param) from exc
 
 
 def _is_upload_file(value: object) -> bool:
@@ -598,6 +613,83 @@ async def videos_create(request: Request):
     return JSONResponse(result)
 
 
+def _xai_video_references(body: dict[str, Any]) -> list[dict[str, str]] | None:
+    image = body.get("image")
+    reference_images = body.get("reference_images")
+    if image is not None and reference_images is not None:
+        raise ValidationError(
+            "image and reference_images cannot be used together",
+            param="image",
+        )
+    if image is not None:
+        return [{"image_url": _image_reference_url(image, param="image")}]
+    if reference_images is None:
+        return None
+    if not isinstance(reference_images, list):
+        raise ValidationError("reference_images must be an array", param="reference_images")
+    if len(reference_images) > 7:
+        raise ValidationError(
+            "reference_images must contain at most 7 images",
+            param="reference_images",
+        )
+    return [
+        {
+            "image_url": _image_reference_url(
+                item,
+                param=f"reference_images.{index}",
+            )
+        }
+        for index, item in enumerate(reference_images)
+    ] or None
+
+
+async def _parse_xai_video_generation_request(request: Request) -> dict[str, Any]:
+    content_type = _normalized_content_type(request)
+    if content_type and content_type != "application/json" and not content_type.endswith("+json"):
+        raise ValidationError("Content-Type must be application/json", param="content_type")
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise ValidationError("Request body must be valid JSON", param="body") from exc
+    if not isinstance(body, dict):
+        raise ValidationError("Request body must be a JSON object", param="body")
+
+    from .video import resolve_xai_video_resolution, resolve_xai_video_size
+
+    seconds = body["duration"] if "duration" in body else body.get("seconds")
+    return {
+        "model": _required_text(body.get("model"), param="model"),
+        "prompt": _required_text(body.get("prompt"), param="prompt"),
+        "seconds": seconds,
+        "size": resolve_xai_video_size(_optional_text(body.get("aspect_ratio")))
+        or _optional_text(body.get("size")),
+        "resolution_name": resolve_xai_video_resolution(
+            _optional_text(body.get("resolution"))
+        ),
+        "preset": _optional_text(body.get("preset")),
+        "input_references": _xai_video_references(body),
+    }
+
+
+@router.post("/videos/generations", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
+async def xai_videos_generations(request: Request):
+    from .video import create_video
+
+    payload = await _parse_xai_video_generation_request(request)
+    result = await create_video(
+        model=payload["model"],
+        prompt=payload["prompt"],
+        seconds=payload.get("seconds"),
+        size=payload.get("size"),
+        resolution_name=payload.get("resolution_name"),
+        preset=payload.get("preset"),
+        input_references=payload.get("input_references"),
+        api_style="xai",
+        id_prefix="xai_video_",
+    )
+    return JSONResponse({"request_id": result["id"]})
+
+
 @router.get("/videos", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
 async def videos_list(
     limit: int = Query(20, ge=1, le=100),
@@ -611,8 +703,13 @@ async def videos_list(
 
 @router.get("/videos/{video_id}", tags=[_TAG_VIDEOS], dependencies=[Depends(verify_api_key)])
 async def videos_retrieve(video_id: str):
-    from .video import retrieve
+    from .video import get_video_job, retrieve, retrieve_xai_video
 
+    job = await get_video_job(video_id)
+    if job is not None and job.api_style == "xai":
+        return JSONResponse(await retrieve_xai_video(video_id))
+    if job is None and video_id.startswith("xai_video_"):
+        return JSONResponse(await retrieve_xai_video(video_id))
     return JSONResponse(await retrieve(video_id))
 
 
@@ -647,53 +744,159 @@ async def videos_delete(video_id: str):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/images/edits", tags=[_TAG_IMAGES], dependencies=[Depends(verify_api_key)])
-async def image_edits(
-    model: Annotated[str, Form(...)],
-    prompt: Annotated[str, Form(...)],
-    image: Annotated[list[UploadFile] | None, File(alias="image[]")] = None,
-    image_alt: Annotated[list[UploadFile] | None, File(alias="image")] = None,
-    mask: Annotated[UploadFile | None, File()] = None,
-    n: Annotated[int, Form()] = 1,
-    size: Annotated[str, Form()] = "1024x1024",
-    response_format: Annotated[str | None, Form()] = None,
-    quality: Annotated[str | None, Form()] = None,
-    output_format: Annotated[str | None, Form()] = None,
-    output_compression: Annotated[int | None, Form()] = None,
-    background: Annotated[str | None, Form()] = None,
-    moderation: Annotated[str | None, Form()] = None,
-):
-    spec = model_registry.get(model)
-    if spec is None or not spec.enabled or not spec.is_image_edit():
-        raise ValidationError(f"Model {model!r} is not an image-edit model", param="model")
-    if mask is not None:
+def _image_reference_url(value: object, *, param: str) -> str:
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
+    if isinstance(value, dict):
+        file_id = _optional_text(value.get("file_id"))
+        if file_id:
+            raise ValidationError("image.file_id is not supported yet", param=param)
+        for key in ("url", "image_url"):
+            item = value.get(key)
+            if isinstance(item, dict):
+                item = item.get("url")
+            url = _optional_text(item)
+            if url:
+                return url
+    raise ValidationError("image must include a URL or data URI", param=param)
+
+
+def _json_image_edit_inputs(value: object) -> list[str]:
+    refs = value if isinstance(value, list) else [value]
+    if not refs:
+        raise ValidationError("image is required", param="image")
+    if len(refs) > 3:
+        raise ValidationError("image must contain at most 3 images", param="image")
+    image_inputs: list[str] = []
+    for index, item in enumerate(refs):
+        image_inputs.append(_image_reference_url(item, param=f"image.{index}"))
+    return image_inputs
+
+
+async def _parse_json_image_edit_request(request: Request) -> dict[str, Any]:
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise ValidationError("Request body must be valid JSON", param="body") from exc
+    if not isinstance(body, dict):
+        raise ValidationError("Request body must be a JSON object", param="body")
+    if body.get("mask") is not None:
         raise ValidationError("mask is not supported yet", param="mask")
+    if "image" not in body:
+        raise ValidationError("image is required", param="image")
+    n = _optional_int(body.get("n"), default=1, param="n")
     _validate_image_edit_n(n, param="n")
 
-    from .images import edit as img_edit
+    return {
+        "model": _required_text(body.get("model"), param="model"),
+        "prompt": _required_text(body.get("prompt"), param="prompt"),
+        "n": n,
+        "size": _optional_text(body.get("size")) or "1024x1024",
+        "aspect_ratio": _optional_text(body.get("aspect_ratio")),
+        "resolution": _optional_text(body.get("resolution")),
+        "response_format": _optional_text(body.get("response_format")),
+        "quality": _optional_text(body.get("quality")),
+        "output_format": _optional_text(body.get("output_format")),
+        "output_compression": body.get("output_compression"),
+        "background": _optional_text(body.get("background")),
+        "moderation": _optional_text(body.get("moderation")),
+        "image_inputs": _json_image_edit_inputs(body.get("image")),
+    }
 
-    image_uploads = _combine_image_edit_uploads(image, image_alt)
+
+async def _parse_form_image_edit_request(request: Request) -> dict[str, Any]:
+    form = await request.form()
+    image = [
+        value for value in form.getlist("image[]")
+        if _is_upload_file(value)
+    ]
+    image_alt = [
+        value for value in form.getlist("image")
+        if _is_upload_file(value)
+    ]
+    mask = _form_first(form, "mask")
+    if mask is not None:
+        raise ValidationError("mask is not supported yet", param="mask")
+
+    image_uploads = _combine_image_edit_uploads(
+        image,  # type: ignore[arg-type]
+        image_alt,  # type: ignore[arg-type]
+    )
     image_inputs = [
         await _upload_to_data_uri(item, param=f"image.{index}")
         for index, item in enumerate(image_uploads)
     ]
+    n = _optional_int(_form_first(form, "n"), default=1, param="n")
+    _validate_image_edit_n(n, param="n")
+    return {
+        "model": _required_text(_form_first(form, "model"), param="model"),
+        "prompt": _required_text(_form_first(form, "prompt"), param="prompt"),
+        "n": n,
+        "size": _optional_text(_form_first(form, "size")) or "1024x1024",
+        "aspect_ratio": _optional_text(_form_first(form, "aspect_ratio")),
+        "resolution": _optional_text(_form_first(form, "resolution")),
+        "response_format": _optional_text(_form_first(form, "response_format")),
+        "quality": _optional_text(_form_first(form, "quality")),
+        "output_format": _optional_text(_form_first(form, "output_format")),
+        "output_compression": _form_first(form, "output_compression"),
+        "background": _optional_text(_form_first(form, "background")),
+        "moderation": _optional_text(_form_first(form, "moderation")),
+        "image_inputs": image_inputs,
+    }
+
+
+async def _parse_image_edit_request(request: Request) -> dict[str, Any]:
+    content_type = _normalized_content_type(request)
+    if (
+        not content_type
+        or content_type == "application/json"
+        or content_type.endswith("+json")
+    ):
+        return await _parse_json_image_edit_request(request)
+    if content_type in _VIDEO_FORM_CONTENT_TYPES:
+        return await _parse_form_image_edit_request(request)
+    raise ValidationError(
+        "Content-Type must be application/json or multipart/form-data",
+        param="content_type",
+    )
+
+
+@router.post("/images/edits", tags=[_TAG_IMAGES], dependencies=[Depends(verify_api_key)])
+async def image_edits(request: Request):
+    payload = await _parse_image_edit_request(request)
+    model = payload["model"]
+    n = payload["n"]
+    spec = model_registry.get(model)
+    if spec is None or not spec.enabled or not spec.is_image_edit():
+        raise ValidationError(f"Model {model!r} is not an image-edit model", param="model")
+    _validate_image_edit_n(n, param="n")
+
+    from .images import edit as img_edit
+
     # Wrap input into a single-message conversation.
-    content = [{"type": "text", "text": prompt}]
-    content.extend({"type": "image_url", "image_url": {"url": image_input}} for image_input in image_inputs)
+    content = [{"type": "text", "text": payload["prompt"]}]
+    content.extend(
+        {"type": "image_url", "image_url": {"url": image_input}}
+        for image_input in payload["image_inputs"]
+    )
     messages = [{"role": "user", "content": content}]
     result = await img_edit(
         model=model,
         messages=messages,
         n=n,
-        size=size,
-        response_format=response_format,
+        size=payload.get("size") or "1024x1024",
+        response_format=payload.get("response_format"),
         stream=False,
         chat_format=False,
-        quality=quality,
-        output_format=output_format,
-        output_compression=output_compression,
-        background=background,
-        moderation=moderation,
+        aspect_ratio=payload.get("aspect_ratio"),
+        resolution=payload.get("resolution"),
+        quality=payload.get("quality"),
+        output_format=payload.get("output_format"),
+        output_compression=payload.get("output_compression"),
+        background=payload.get("background"),
+        moderation=payload.get("moderation"),
     )
     return JSONResponse(result)
 

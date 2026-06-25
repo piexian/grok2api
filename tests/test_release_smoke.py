@@ -45,6 +45,8 @@ from app.products.openai import images as image_service
 from app.products.openai import video as video_service
 from app.products.openai.router import _available_pools
 from app.products.openai.router import _combine_image_edit_uploads
+from app.products.openai.router import _parse_image_edit_request
+from app.products.openai.router import _parse_xai_video_generation_request
 from app.products.openai.router import _parse_videos_create_request
 from app.products.openai.schemas import ImageGenerationRequest
 from app.products.web.admin.batch import _prioritize_refresh_tokens
@@ -692,6 +694,83 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             _combine_image_edit_uploads(None, None)
         self.assertEqual(ctx.exception.param, "image")
 
+    def test_xai_imagine_model_aliases(self):
+        image = resolve("grok-imagine-image-quality")
+        self.assertTrue(image.is_image())
+        self.assertTrue(image.is_image_edit())
+        self.assertTrue(resolve("grok-imagine-video-1.5").is_video())
+
+    async def test_xai_image_edit_json_parser(self):
+        class FakeRequest:
+            headers = {"content-type": "application/json; charset=utf-8"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-image-quality",
+                    "prompt": "make it cinematic",
+                    "image": {"type": "image_url", "url": "https://example.test/a.png"},
+                    "aspect_ratio": "16:9",
+                    "resolution": "2k",
+                    "response_format": "b64_json",
+                }
+
+        payload = await _parse_image_edit_request(FakeRequest())
+
+        self.assertEqual(payload["model"], "grok-imagine-image-quality")
+        self.assertEqual(payload["image_inputs"], ["https://example.test/a.png"])
+        self.assertEqual(payload["aspect_ratio"], "16:9")
+        self.assertEqual(payload["resolution"], "2k")
+        self.assertEqual(payload["response_format"], "b64_json")
+
+    async def test_xai_image_edit_json_parser_rejects_empty_image_and_bad_n(self):
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            def __init__(self, body: dict):
+                self.body = body
+
+            async def json(self):
+                return self.body
+
+        base = {
+            "model": "grok-imagine-image-quality",
+            "prompt": "make it cinematic",
+            "image": {"url": "https://example.test/a.png"},
+        }
+
+        with self.assertRaises(ValidationError) as empty_ctx:
+            await _parse_image_edit_request(FakeRequest({**base, "image": []}))
+        self.assertEqual(empty_ctx.exception.param, "image")
+
+        with self.assertRaises(ValidationError) as n_ctx:
+            await _parse_image_edit_request(FakeRequest({**base, "n": 0}))
+        self.assertEqual(n_ctx.exception.param, "n")
+
+    async def test_xai_video_generation_json_parser(self):
+        class FakeRequest:
+            headers = {"content-type": "application/json"}
+
+            async def json(self):
+                return {
+                    "model": "grok-imagine-video-1.5",
+                    "prompt": "pan across a city",
+                    "duration": 10,
+                    "aspect_ratio": "4:3",
+                    "resolution": "480p",
+                    "image": {"url": "https://example.test/start.png"},
+                }
+
+        payload = await _parse_xai_video_generation_request(FakeRequest())
+
+        self.assertEqual(payload["model"], "grok-imagine-video-1.5")
+        self.assertEqual(payload["seconds"], 10)
+        self.assertEqual(payload["size"], "1024x768")
+        self.assertEqual(payload["resolution_name"], "480p")
+        self.assertEqual(
+            payload["input_references"],
+            [{"image_url": "https://example.test/start.png"}],
+        )
+
     async def test_video_job_openai_shape_list_and_delete(self):
         async with video_service._VIDEO_JOBS_LOCK:
             video_service._VIDEO_JOBS.clear()
@@ -817,6 +896,41 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
             payload["input_references"],
             {"image_url": "https://example.test/a.png"},
         )
+
+    async def test_xai_video_status_response_shape(self):
+        async with video_service._VIDEO_JOBS_LOCK:
+            video_service._VIDEO_JOBS.clear()
+
+        try:
+            await video_service._put_video_job(
+                video_service._VideoJob(
+                    id="xai_video_smoke",
+                    model="grok-imagine-video-1.5",
+                    prompt="test",
+                    seconds="10",
+                    size="1280x720",
+                    quality="standard",
+                    created_at=100,
+                    status="completed",
+                    progress=100,
+                    video_url="https://vidgen.x.ai/video.mp4",
+                    api_style="xai",
+                )
+            )
+
+            body = await video_service.retrieve_xai_video("xai_video_smoke")
+            self.assertEqual(body["status"], "done")
+            self.assertEqual(body["model"], "grok-imagine-video-1.5")
+            self.assertEqual(body["video"]["url"], "https://vidgen.x.ai/video.mp4")
+            self.assertEqual(body["video"]["duration"], 10)
+            self.assertTrue(body["video"]["respect_moderation"])
+            self.assertEqual(
+                await video_service.retrieve_xai_video("xai_video_missing"),
+                {"status": "expired"},
+            )
+        finally:
+            async with video_service._VIDEO_JOBS_LOCK:
+                video_service._VIDEO_JOBS.clear()
 
     async def test_admin_tokens_includes_console_quota(self):
         with tempfile.TemporaryDirectory() as tmp:
