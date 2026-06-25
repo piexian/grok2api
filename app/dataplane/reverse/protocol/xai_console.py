@@ -390,6 +390,7 @@ def build_console_payload(
     reasoning_effort: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
+    response_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the JSON payload for POST /v1/responses on console.x.ai.
 
@@ -436,6 +437,10 @@ def build_console_payload(
         payload["tools"] = tools
         if tool_choice is not None:
             payload["tool_choice"] = tool_choice
+    if response_options:
+        for key, value in response_options.items():
+            if value is not None:
+                payload[key] = value
 
     if isinstance(input, str):
         msg_repr = f"len={len(input)}"

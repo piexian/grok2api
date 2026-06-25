@@ -40,12 +40,26 @@ class ChatCompletionRequest(BaseModel):
     reasoning_effort:    str | None                 = None
     temperature:         float | None               = 0.8
     top_p:               float | None               = 0.95
+    response_format:     str | dict[str, Any] | None = None
     image_config:        ImageConfig | None         = None
     video_config:        VideoConfig | None         = None
     tools:               list[dict[str, Any]] | None = None
     tool_choice:         str | dict[str, Any] | None = None
     parallel_tool_calls: bool | None                = True
     max_tokens:          int | None                 = None
+    max_completion_tokens: int | None               = None
+    metadata:            dict[str, Any] | None      = None
+    service_tier:        str | None                 = None
+    store:               bool | None                = None
+    stream_options:      dict[str, Any] | None      = None
+    user:                str | None                 = None
+    stop:                str | list[str] | None     = None
+    n:                   int | None                 = None
+    logprobs:            bool | None                = None
+    top_logprobs:        int | None                 = None
+    seed:                int | None                 = None
+    presence_penalty:    float | None               = None
+    frequency_penalty:   float | None               = None
 
 
 class ImageGenerationRequest(BaseModel):

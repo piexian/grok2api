@@ -164,11 +164,70 @@ def _validate_chat(req: ChatCompletionRequest) -> None:
         raise ValidationError("temperature must be between 0 and 2", param="temperature")
     if req.top_p is not None and not (0 <= req.top_p <= 1):
         raise ValidationError("top_p must be between 0 and 1", param="top_p")
+    for param, value in (
+        ("max_tokens", req.max_tokens),
+        ("max_completion_tokens", req.max_completion_tokens),
+    ):
+        if value is not None and value <= 0:
+            raise ValidationError(f"{param} must be greater than 0", param=param)
+    if req.n is not None and req.n != 1:
+        raise ValidationError("n currently supports only 1", param="n")
+    if req.top_logprobs is not None and not (0 <= req.top_logprobs <= 20):
+        raise ValidationError("top_logprobs must be between 0 and 20", param="top_logprobs")
+    for param, value in (
+        ("presence_penalty", req.presence_penalty),
+        ("frequency_penalty", req.frequency_penalty),
+    ):
+        if value is not None and not (-2 <= value <= 2):
+            raise ValidationError(f"{param} must be between -2 and 2", param=param)
     if req.reasoning_effort is not None and req.reasoning_effort not in _EFFORT_VALUES:
         raise ValidationError(
             f"reasoning_effort must be one of {sorted(_EFFORT_VALUES)}",
             param="reasoning_effort",
         )
+
+
+def _chat_response_text_options(
+    response_format: str | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if response_format is None:
+        return None
+    if isinstance(response_format, str):
+        response_format = {"type": response_format}
+    if not isinstance(response_format, dict):
+        raise ValidationError("response_format must be a string or object", param="response_format")
+    format_type = str(response_format.get("type") or "").strip()
+    if format_type not in {"text", "json_object", "json_schema"}:
+        raise ValidationError(
+            "response_format.type must be one of ['text', 'json_object', 'json_schema']",
+            param="response_format.type",
+        )
+    return {"format": dict(response_format)}
+
+
+def _chat_console_response_options(req: ChatCompletionRequest) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    max_output_tokens = (
+        req.max_completion_tokens
+        if req.max_completion_tokens is not None
+        else req.max_tokens
+    )
+    if max_output_tokens is not None:
+        options["max_output_tokens"] = max_output_tokens
+    text = _chat_response_text_options(req.response_format)
+    if text is not None:
+        options["text"] = text
+    if req.parallel_tool_calls is not None:
+        options["parallel_tool_calls"] = req.parallel_tool_calls
+    if req.store is not None:
+        options["store"] = req.store
+    if req.metadata is not None:
+        options["metadata"] = req.metadata
+    if req.service_tier is not None:
+        options["service_tier"] = req.service_tier
+    if req.user is not None:
+        options["user"] = req.user
+    return options
 
 
 def _validate_image_n(model_name: str, n: int, *, param: str) -> None:
@@ -223,7 +282,6 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
     from app.platform.config.snapshot import get_config
 
     cfg = get_config()
-    is_stream = (req.stream if req.stream is not None else cfg.get_bool("features.stream", True))
 
     spec = model_registry.get(req.model)
     if spec is None:
@@ -232,6 +290,11 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
             param="model",
             code="model_not_found",
         )
+    is_stream = (
+        bool(req.stream)
+        if spec.is_console()
+        else (req.stream if req.stream is not None else cfg.get_bool("features.stream", True))
+    )
     messages = [m.model_dump(exclude_none=True) for m in req.messages]
 
     try:
@@ -320,9 +383,15 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 emit_think=emit_think,
                 tools=req.tools,
                 tool_choice=req.tool_choice,
-                temperature=req.temperature or 0.8,
-                top_p=req.top_p or 0.95,
+                temperature=0.8 if req.temperature is None else req.temperature,
+                top_p=0.95 if req.top_p is None else req.top_p,
                 reasoning_effort=req.reasoning_effort,
+                response_options=(
+                    _chat_console_response_options(req)
+                    if spec.is_console()
+                    else None
+                ),
+                stream_options=req.stream_options if spec.is_console() else None,
             )
 
     except AppError:

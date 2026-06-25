@@ -48,11 +48,14 @@ from app.products.openai._format import build_resp_usage
 from app.products.openai._format import ensure_resp_object_compat
 from app.products.openai._format import make_resp_object
 from app.products.openai.router import _available_pools
+from app.products.openai.router import _chat_console_response_options
 from app.products.openai.router import _combine_image_edit_uploads
 from app.products.openai.router import _parse_image_edit_request
 from app.products.openai.router import _parse_xai_video_generation_request
 from app.products.openai.router import _parse_videos_create_request
 from app.products.openai.router import _safe_sse_responses
+from app.products.openai.router import _validate_chat
+from app.products.openai.schemas import ChatCompletionRequest
 from app.products.openai.schemas import ImageGenerationRequest
 from app.products.openai.schemas import ResponsesCreateRequest
 from app.products.web.admin.batch import _prioritize_refresh_tokens
@@ -657,6 +660,72 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(record.last_use_at)
             finally:
                 await repo.close()
+
+    def test_console_chat_request_maps_openai_fields_to_responses_options(self):
+        req = ChatCompletionRequest(
+            model="grok-build-0.1",
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=64,
+            max_completion_tokens=128,
+            response_format={"type": "json_object"},
+            parallel_tool_calls=False,
+            store=False,
+            metadata={"trace": "smoke"},
+            service_tier="priority",
+            stream_options={"include_usage": True},
+            user="user-1",
+            stop=["END"],
+            seed=123,
+            presence_penalty=0.5,
+            frequency_penalty=-0.5,
+            n=1,
+        )
+
+        _validate_chat(req)
+        options = _chat_console_response_options(req)
+
+        self.assertEqual(options["max_output_tokens"], 128)
+        self.assertEqual(options["text"], {"format": {"type": "json_object"}})
+        self.assertFalse(options["parallel_tool_calls"])
+        self.assertFalse(options["store"])
+        self.assertEqual(options["metadata"], {"trace": "smoke"})
+        self.assertEqual(options["service_tier"], "priority")
+        self.assertEqual(options["user"], "user-1")
+        self.assertNotIn("stop", options)
+        self.assertNotIn("seed", options)
+        self.assertNotIn("presence_penalty", options)
+        self.assertNotIn("frequency_penalty", options)
+
+    def test_chat_request_rejects_unsupported_multi_choice(self):
+        req = ChatCompletionRequest(
+            model="grok-build-0.1",
+            messages=[{"role": "user", "content": "hello"}],
+            n=2,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            _validate_chat(req)
+        self.assertEqual(ctx.exception.param, "n")
+
+    def test_console_chat_response_format_validation(self):
+        good = ChatCompletionRequest(
+            model="grok-build-0.1",
+            messages=[{"role": "user", "content": "hello"}],
+            response_format="text",
+        )
+        self.assertEqual(
+            _chat_console_response_options(good)["text"],
+            {"format": {"type": "text"}},
+        )
+
+        bad = ChatCompletionRequest(
+            model="grok-build-0.1",
+            messages=[{"role": "user", "content": "hello"}],
+            response_format={"type": "xml"},
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            _chat_console_response_options(bad)
+        self.assertEqual(ctx.exception.param, "response_format.type")
 
     def test_xai_responses_schema_accepts_compat_fields(self):
         req = ResponsesCreateRequest(

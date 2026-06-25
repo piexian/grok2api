@@ -464,6 +464,7 @@ async def _console_post(
     tool_choice: Any,
     timeout_s: float,
     reasoning_effort: str | None = None,
+    response_options: dict[str, Any] | None = None,
 ) -> Any:
     """POST to console.x.ai/v1/responses; return ``(session, response)``.
 
@@ -485,6 +486,7 @@ async def _console_post(
         reasoning_effort=reasoning_effort,
         tools=tools,
         tool_choice=tool_choice,
+        response_options=response_options,
     )
     payload_bytes = orjson.dumps(payload)
 
@@ -554,6 +556,8 @@ async def _console_completions(
     reasoning_effort: str | None = None,
     tools: list[dict] | None = None,
     tool_choice: Any = None,
+    response_options: dict[str, Any] | None = None,
+    stream_options: dict[str, Any] | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Dispatch a chat completion through console.x.ai/v1/responses.
 
@@ -570,6 +574,9 @@ async def _console_completions(
     # Apply per-model default effort when caller didn't specify.
     if reasoning_effort is None and spec.default_reasoning_effort:
         reasoning_effort = spec.default_reasoning_effort
+    response_options = dict(response_options or {})
+    stream_options = dict(stream_options or {})
+    include_stream_usage = bool(stream_options.get("include_usage"))
     cfg = get_config()
     console_model = spec.console_model
 
@@ -642,6 +649,7 @@ async def _console_completions(
                             reasoning_effort=reasoning_effort,
                             tools=console_tools,
                             tool_choice=console_tool_choice,
+                            response_options=response_options,
                             timeout_s=timeout_s,
                         )
                         try:
@@ -761,6 +769,15 @@ async def _console_completions(
                                 "",
                                 is_final=True,
                                 annotations=chat_anns,
+                                usage=(
+                                    build_usage(
+                                        adapter.usage.get("prompt_tokens", 0),
+                                        adapter.usage.get("completion_tokens", 0),
+                                        reasoning_tokens=adapter.usage.get("reasoning_tokens", 0),
+                                    )
+                                    if include_stream_usage and adapter.usage
+                                    else None
+                                ),
                             )
                             # Inject search_sources at root level (parallel
                             # to grok.com path behaviour). Avoids putting
@@ -866,6 +883,7 @@ async def _console_completions(
                     reasoning_effort=reasoning_effort,
                     tools=console_tools,
                     tool_choice=console_tool_choice,
+                    response_options=response_options,
                     timeout_s=timeout_s,
                 )
                 try:
@@ -1010,6 +1028,8 @@ async def completions(
     top_p: float = 0.95,
     reasoning_effort: str | None = None,
     request_overrides: dict | None = None,
+    response_options: dict | None = None,
+    stream_options: dict | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Entry point for /v1/chat/completions.
 
@@ -1047,6 +1067,8 @@ async def completions(
             reasoning_effort=reasoning_effort,
             tools=tools,
             tool_choice=tool_choice,
+            response_options=response_options,
+            stream_options=stream_options,
         )
 
     message, files = _extract_message(messages)

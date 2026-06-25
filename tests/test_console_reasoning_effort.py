@@ -28,3 +28,28 @@ class ConsoleReasoningEffortTest(unittest.TestCase):
         )
 
         self.assertEqual(payload["reasoning"], {"effort": "high"})
+
+    def test_console_payload_includes_response_options(self):
+        payload = build_console_payload(
+            console_model="grok-4.3",
+            input="hello",
+            response_options={
+                "max_output_tokens": 128,
+                "text": {"format": {"type": "json_object"}},
+                "store": False,
+                "metadata": {"trace": "smoke"},
+                "service_tier": "priority",
+                "user": "user-1",
+                "parallel_tool_calls": False,
+                "prompt_cache_key": None,
+            },
+        )
+
+        self.assertEqual(payload["max_output_tokens"], 128)
+        self.assertEqual(payload["text"], {"format": {"type": "json_object"}})
+        self.assertFalse(payload["store"])
+        self.assertEqual(payload["metadata"], {"trace": "smoke"})
+        self.assertEqual(payload["service_tier"], "priority")
+        self.assertEqual(payload["user"], "user-1")
+        self.assertFalse(payload["parallel_tool_calls"])
+        self.assertNotIn("prompt_cache_key", payload)
