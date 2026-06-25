@@ -144,12 +144,94 @@ def make_resp_id(prefix: str) -> str:
 
 
 def build_resp_usage(input_tokens: int, output_tokens: int, reasoning_tokens: int = 0) -> dict:
+    it = max(0, input_tokens)
+    ot = max(0, output_tokens)
+    rt = max(0, reasoning_tokens)
     return {
-        "input_tokens":  max(0, input_tokens),
-        "output_tokens": max(0, output_tokens),
-        "total_tokens":  max(0, input_tokens + output_tokens),
-        "output_tokens_details": {"reasoning_tokens": max(0, reasoning_tokens)},
+        "input_tokens": it,
+        "input_tokens_details": {"cached_tokens": 0},
+        "output_tokens": ot,
+        "output_tokens_details": {"reasoning_tokens": rt},
+        "total_tokens": it + ot,
+        "num_sources_used": 0,
+        "num_server_side_tools_used": 0,
     }
+
+
+def _response_compat_defaults(
+    *,
+    created_at: int,
+    status: str,
+    max_output_tokens: int | None = None,
+    previous_response_id: str | None = None,
+    reasoning: dict | None = None,
+    temperature: float | None = None,
+    text: dict | None = None,
+    tool_choice: Any = None,
+    tools: list | None = None,
+    top_p: float | None = None,
+    parallel_tool_calls: bool = True,
+    store: bool = True,
+    metadata: dict | None = None,
+    background: bool = False,
+    service_tier: str = "default",
+    truncation: str = "disabled",
+    top_logprobs: int = 0,
+    presence_penalty: float = 0,
+    frequency_penalty: float = 0,
+    prompt_cache_key: str | None = None,
+    max_tool_calls: int | None = None,
+    safety_identifier: str | None = None,
+    error: dict | None = None,
+    instructions: str | None = None,
+    user: str | None = None,
+    incomplete_details: dict | None = None,
+) -> dict:
+    defaults: dict = {
+        "max_output_tokens": max_output_tokens,
+        "parallel_tool_calls": parallel_tool_calls,
+        "previous_response_id": previous_response_id,
+        "reasoning": reasoning if reasoning is not None else {"effort": None, "summary": None},
+        "temperature": temperature,
+        "text": text if text is not None else {"format": {"type": "text"}},
+        "tool_choice": tool_choice if tool_choice is not None else "auto",
+        "tools": tools or [],
+        "top_p": top_p,
+        "user": user,
+        "incomplete_details": incomplete_details,
+        "store": store,
+        "metadata": metadata or {},
+        "background": background,
+        "service_tier": service_tier,
+        "truncation": truncation,
+        "top_logprobs": top_logprobs,
+        "presence_penalty": presence_penalty,
+        "frequency_penalty": frequency_penalty,
+        "prompt_cache_key": prompt_cache_key,
+        "max_tool_calls": max_tool_calls,
+        "safety_identifier": safety_identifier,
+        "error": error,
+        "instructions": instructions,
+    }
+    if status == "completed":
+        defaults["completed_at"] = created_at
+    return defaults
+
+
+def ensure_resp_object_compat(obj: dict, **defaults: Any) -> dict:
+    if obj.get("object") != "response":
+        return obj
+    created_at = int(obj.get("created_at") or time.time())
+    status = str(obj.get("status") or "completed")
+    merged = dict(obj)
+    merged["created_at"] = created_at
+    for key, value in _response_compat_defaults(
+        created_at=created_at,
+        status=status,
+        **defaults,
+    ).items():
+        merged.setdefault(key, value)
+    return merged
 
 
 def make_resp_object(
@@ -158,18 +240,23 @@ def make_resp_object(
     status:      str,
     output:      list[dict],
     usage:       dict | None = None,
+    **compat: Any,
 ) -> dict:
+    created_at = int(compat.pop("created_at", None) or time.time())
     obj: dict = {
         "id":         response_id,
         "object":     "response",
-        "created_at": int(time.time()),
+        "created_at": created_at,
         "status":     status,
         "model":      model,
         "output":     output,
     }
     if usage is not None:
         obj["usage"] = usage
-    return obj
+    return ensure_resp_object_compat(
+        obj,
+        **compat,
+    )
 
 
 def format_sse(event: str, data: dict) -> str:
@@ -298,5 +385,6 @@ __all__ = [
     # tool calls
     "make_tool_call_chunk", "make_tool_call_done_chunk", "make_tool_call_response",
     # responses api
-    "make_resp_id", "build_resp_usage", "make_resp_object", "format_sse",
+    "make_resp_id", "build_resp_usage", "ensure_resp_object_compat",
+    "make_resp_object", "format_sse",
 ]

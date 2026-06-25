@@ -11,7 +11,7 @@ import orjson
 
 from app.platform.logging.logger import logger
 from app.platform.config.snapshot import get_config
-from app.platform.errors import RateLimitError, UpstreamError
+from app.platform.errors import AppError, ErrorKind, RateLimitError, UpstreamError
 from app.platform.runtime.clock import now_s
 from app.platform.tokens import estimate_prompt_tokens, estimate_tokens, estimate_tool_call_tokens
 from app.control.model.enums import ModeId
@@ -55,6 +55,78 @@ from app.dataplane.reverse.protocol.tool_prompt import (
 )
 from app.dataplane.reverse.protocol.tool_parser import parse_tool_calls
 from ._tool_sieve import ToolSieve
+
+_RESPONSE_TTL_S = 30 * 24 * 60 * 60
+_MAX_STORED_RESPONSES = 1000
+_RESPONSE_STORE_LOCK = asyncio.Lock()
+_RESPONSE_STORE: dict[str, tuple[int, dict[str, Any]]] = {}
+
+
+def _copy_response(response: dict[str, Any]) -> dict[str, Any]:
+    return orjson.loads(orjson.dumps(response))
+
+
+def _purge_response_store_locked(now: int) -> None:
+    expired = [
+        response_id
+        for response_id, (expires_at, _response) in _RESPONSE_STORE.items()
+        if expires_at <= now
+    ]
+    for response_id in expired:
+        _RESPONSE_STORE.pop(response_id, None)
+
+
+def _response_not_found(response_id: str) -> AppError:
+    return AppError(
+        f"Response {response_id!r} was not found",
+        kind=ErrorKind.VALIDATION,
+        code="response_not_found",
+        status=404,
+        details={"param": "response_id"},
+    )
+
+
+async def remember_response(response: dict[str, Any]) -> dict[str, Any]:
+    if response.get("object") != "response" or response.get("store") is False:
+        return response
+    response_id = str(response.get("id") or "").strip()
+    if not response_id:
+        return response
+
+    now = now_s()
+    async with _RESPONSE_STORE_LOCK:
+        _purge_response_store_locked(now)
+        _RESPONSE_STORE[response_id] = (
+            now + _RESPONSE_TTL_S,
+            _copy_response(response),
+        )
+        while len(_RESPONSE_STORE) > _MAX_STORED_RESPONSES:
+            oldest_id = min(
+                _RESPONSE_STORE,
+                key=lambda item: _RESPONSE_STORE[item][0],
+            )
+            _RESPONSE_STORE.pop(oldest_id, None)
+    return response
+
+
+async def retrieve_response(response_id: str) -> dict[str, Any]:
+    now = now_s()
+    async with _RESPONSE_STORE_LOCK:
+        _purge_response_store_locked(now)
+        stored = _RESPONSE_STORE.get(response_id)
+        if stored is None:
+            raise _response_not_found(response_id)
+        return _copy_response(stored[1])
+
+
+async def delete_response(response_id: str) -> dict[str, Any]:
+    now = now_s()
+    async with _RESPONSE_STORE_LOCK:
+        _purge_response_store_locked(now)
+        stored = _RESPONSE_STORE.pop(response_id, None)
+        if stored is None:
+            raise _response_not_found(response_id)
+    return {"id": response_id, "object": "response", "deleted": True}
 
 # ---------------------------------------------------------------------------
 # Tool format normalisation
@@ -333,6 +405,7 @@ async def _console_responses_dispatch(
     tools: list[dict] | None,
     tool_choice: Any,
     reasoning_effort: str | None = None,
+    response_options: dict[str, Any] | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Dispatch a /v1/responses request through console.x.ai.
 
@@ -345,6 +418,7 @@ async def _console_responses_dispatch(
     # behaviour of _console_completions for the /v1/responses endpoint.
     if reasoning_effort is None and spec.default_reasoning_effort:
         reasoning_effort = spec.default_reasoning_effort
+    response_options = dict(response_options or {})
     cfg = get_config()
     console_model = spec.console_model
 
@@ -425,6 +499,7 @@ async def _console_responses_dispatch(
                                             model,
                                             "in_progress",
                                             [],
+                                            **response_options,
                                         ),
                                     })
                                 yield ": heartbeat\n\n"
@@ -461,6 +536,7 @@ async def _console_responses_dispatch(
                                                 "completed",
                                                 function_items,
                                                 build_resp_usage(input_tokens, output_tokens),
+                                                **response_options,
                                             ),
                                         })
                                 else:
@@ -497,6 +573,7 @@ async def _console_responses_dispatch(
                                                 "completed",
                                                 [msg_item],
                                                 build_resp_usage(input_tokens, output_tokens),
+                                                **response_options,
                                             ),
                                         })
                             else:
@@ -732,10 +809,12 @@ async def create(
     reasoning_effort: str | None = None,
     tools: list[dict] | None = None,
     tool_choice: Any = None,
+    response_options: dict[str, Any] | None = None,
 ) -> dict | AsyncGenerator[str, None]:
 
     cfg = get_config()
     spec = resolve_model(model)
+    response_options = dict(response_options or {})
 
     messages: list[dict] = []
     if instructions:
@@ -763,6 +842,7 @@ async def create(
             reasoning_effort=reasoning_effort,
             tools=tools,
             tool_choice=tool_choice,
+            response_options=response_options,
         )
 
     message, files = _extract_message(messages)
@@ -826,7 +906,13 @@ async def create(
                     yield format_sse(
                         "response.created", {
                             "type": "response.created",
-                            "response": make_resp_object(response_id, model, "in_progress", []),
+                            "response": make_resp_object(
+                                response_id,
+                                model,
+                                "in_progress",
+                                [],
+                                **response_options,
+                            ),
                         })
 
                     ended = False
@@ -1037,6 +1123,7 @@ async def create(
                                     "completed",
                                     output,
                                     build_resp_usage(pt, ct + rt, rt),
+                                    **response_options,
                                 ),
                             })
                         yield "data: [DONE]\n\n"
@@ -1165,6 +1252,7 @@ async def create(
                                     "completed",
                                     output,
                                     build_resp_usage(pt, ct + rt, rt),
+                                    **response_options,
                                 ),
                             })
                         yield "data: [DONE]\n\n"
@@ -1335,6 +1423,7 @@ async def create(
                 "completed",
                 output,
                 build_resp_usage(pt, ct + rt, rt),
+                **response_options,
             )
 
     logger.info(
@@ -1378,7 +1467,8 @@ async def create(
         "completed",
         output,
         build_resp_usage(pt, ct + rt, rt),
+        **response_options,
     )
 
 
-__all__ = ["create"]
+__all__ = ["create", "delete_response", "remember_response", "retrieve_response"]

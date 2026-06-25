@@ -355,10 +355,48 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
 # ---------------------------------------------------------------------------
 
 
-async def _safe_sse_responses(stream) -> AsyncGenerator[str, None]:
+async def _remember_completed_response_frame(
+    chunk: str,
+    response_options: dict[str, Any],
+) -> None:
+    if "response.completed" not in chunk:
+        return
+    from ._format import ensure_resp_object_compat
+    from .responses import remember_response
+
+    for frame in chunk.split("\n\n"):
+        event = ""
+        data_lines: list[str] = []
+        for line in frame.splitlines():
+            if line.startswith("event:"):
+                event = line.removeprefix("event:").strip()
+            elif line.startswith("data:"):
+                data_lines.append(line.removeprefix("data:").strip())
+        if event != "response.completed" or not data_lines:
+            continue
+        try:
+            payload = orjson.loads("\n".join(data_lines))
+        except orjson.JSONDecodeError:
+            continue
+        response = payload.get("response")
+        if isinstance(response, dict):
+            await remember_response(
+                ensure_resp_object_compat(response, **response_options)
+            )
+
+
+async def _safe_sse_responses(
+    stream,
+    *,
+    store: bool = False,
+    response_options: dict[str, Any] | None = None,
+) -> AsyncGenerator[str, None]:
     """SSE wrapper that converts errors to Responses API error events."""
+    response_options = dict(response_options or {})
     try:
         async for chunk in stream:
+            if store:
+                await _remember_completed_response_frame(chunk, response_options)
             yield chunk
     except Exception as exc:
         from app.platform.errors import AppError
@@ -391,9 +429,11 @@ async def responses_endpoint(req: ResponsesCreateRequest):
         )
     if not req.input:
         raise _ValidationError("input cannot be empty", param="input")
+    if req.top_logprobs is not None and not (0 <= req.top_logprobs <= 8):
+        raise _ValidationError("top_logprobs must be between 0 and 8", param="top_logprobs")
 
     cfg = get_config()
-    is_stream = (req.stream if req.stream is not None else cfg.get_bool("features.stream", True))
+    is_stream = bool(req.stream)
 
     # Map reasoning param → emit_think flag.
     # reasoning=None → use config; reasoning.effort="none" → off; otherwise on.
@@ -409,7 +449,44 @@ async def responses_endpoint(req: ResponsesCreateRequest):
     else:
         emit_think = True
 
+    temperature = 0.8 if req.temperature is None else req.temperature
+    top_p = 0.95 if req.top_p is None else req.top_p
+    store = True if req.store is None else req.store
+    reasoning = (
+        dict(req.reasoning)
+        if isinstance(req.reasoning, dict)
+        else {"effort": reasoning_effort, "summary": None}
+    )
+    reasoning.setdefault("effort", reasoning_effort)
+    reasoning.setdefault("summary", None)
+    response_options = {
+        "background": bool(req.background) if req.background is not None else False,
+        "frequency_penalty": 0 if req.frequency_penalty is None else req.frequency_penalty,
+        "instructions": req.instructions,
+        "max_output_tokens": req.max_output_tokens,
+        "max_tool_calls": req.max_tool_calls,
+        "metadata": req.metadata or {},
+        "parallel_tool_calls": True if req.parallel_tool_calls is None else req.parallel_tool_calls,
+        "presence_penalty": 0 if req.presence_penalty is None else req.presence_penalty,
+        "previous_response_id": req.previous_response_id,
+        "prompt_cache_key": req.prompt_cache_key,
+        "reasoning": reasoning,
+        "safety_identifier": req.safety_identifier,
+        "service_tier": req.service_tier or "default",
+        "store": store,
+        "temperature": temperature,
+        "text": req.text or {"format": {"type": "text"}},
+        "tool_choice": req.tool_choice if req.tool_choice is not None else "auto",
+        "tools": req.tools or [],
+        "top_logprobs": 0 if req.top_logprobs is None else req.top_logprobs,
+        "top_p": top_p,
+        "truncation": req.truncation or "disabled",
+        "user": req.user,
+    }
+
+    from ._format import ensure_resp_object_compat
     from .responses import create as responses_create
+    from .responses import remember_response
 
     result = await responses_create(
         model=req.model,
@@ -417,20 +494,42 @@ async def responses_endpoint(req: ResponsesCreateRequest):
         instructions=req.instructions,
         stream=is_stream,
         emit_think=emit_think,
-        temperature=req.temperature or 0.8,
-        top_p=req.top_p or 0.95,
+        temperature=temperature,
+        top_p=top_p,
         reasoning_effort=reasoning_effort,
         tools=req.tools or None,
         tool_choice=req.tool_choice,
+        response_options=response_options,
     )
 
     if isinstance(result, dict):
+        result = ensure_resp_object_compat(result, **response_options)
+        if store:
+            await remember_response(result)
         return JSONResponse(result)
     return StreamingResponse(
-        _safe_sse_responses(result),
+        _safe_sse_responses(
+            result,
+            store=store,
+            response_options=response_options,
+        ),
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
+
+
+@router.get("/responses/{response_id}", tags=[_TAG_RESPONSES], dependencies=[Depends(verify_api_key)])
+async def responses_retrieve(response_id: str):
+    from .responses import retrieve_response
+
+    return JSONResponse(await retrieve_response(response_id))
+
+
+@router.delete("/responses/{response_id}", tags=[_TAG_RESPONSES], dependencies=[Depends(verify_api_key)])
+async def responses_delete(response_id: str):
+    from .responses import delete_response
+
+    return JSONResponse(await delete_response(response_id))
 
 
 # ---------------------------------------------------------------------------

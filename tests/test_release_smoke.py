@@ -42,13 +42,19 @@ from app.platform.meta import get_project_version
 from app.platform.startup import run_account_backfill_migrations
 from app.platform.update_check import _is_newer
 from app.products.openai import images as image_service
+from app.products.openai import responses as responses_service
 from app.products.openai import video as video_service
+from app.products.openai._format import build_resp_usage
+from app.products.openai._format import ensure_resp_object_compat
+from app.products.openai._format import make_resp_object
 from app.products.openai.router import _available_pools
 from app.products.openai.router import _combine_image_edit_uploads
 from app.products.openai.router import _parse_image_edit_request
 from app.products.openai.router import _parse_xai_video_generation_request
 from app.products.openai.router import _parse_videos_create_request
+from app.products.openai.router import _safe_sse_responses
 from app.products.openai.schemas import ImageGenerationRequest
+from app.products.openai.schemas import ResponsesCreateRequest
 from app.products.web.admin.batch import _prioritize_refresh_tokens
 
 
@@ -651,6 +657,132 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(record.last_use_at)
             finally:
                 await repo.close()
+
+    def test_xai_responses_schema_accepts_compat_fields(self):
+        req = ResponsesCreateRequest(
+            model="grok-4.3",
+            input="hello",
+            service_tier="priority",
+            text={"format": {"type": "text"}},
+            top_logprobs=8,
+            frequency_penalty=0,
+            presence_penalty=0,
+            max_tool_calls=3,
+            prompt_cache_key="cache-key",
+            safety_identifier="safe-user",
+            user="user-1",
+        )
+
+        self.assertIsNone(req.stream)
+        self.assertEqual(req.service_tier, "priority")
+        self.assertEqual(req.top_logprobs, 8)
+        self.assertEqual(req.max_tool_calls, 3)
+
+    async def test_xai_response_object_shape_store_retrieve_and_delete(self):
+        async with responses_service._RESPONSE_STORE_LOCK:
+            responses_service._RESPONSE_STORE.clear()
+
+        try:
+            body = make_resp_object(
+                "resp_smoke",
+                "grok-4.3",
+                "completed",
+                [
+                    {
+                        "id": "msg_smoke",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "hello",
+                                "annotations": [],
+                            }
+                        ],
+                        "status": "completed",
+                    }
+                ],
+                build_resp_usage(3, 2, 1),
+                metadata={"trace": "smoke"},
+                previous_response_id="resp_prev",
+                service_tier="default",
+                store=True,
+                temperature=0.7,
+                top_p=0.95,
+            )
+
+            self.assertEqual(body["object"], "response")
+            self.assertEqual(body["status"], "completed")
+            self.assertEqual(body["completed_at"], body["created_at"])
+            self.assertTrue(body["parallel_tool_calls"])
+            self.assertEqual(body["metadata"], {"trace": "smoke"})
+            self.assertEqual(body["previous_response_id"], "resp_prev")
+            self.assertEqual(body["text"], {"format": {"type": "text"}})
+            self.assertEqual(body["tool_choice"], "auto")
+            self.assertEqual(body["usage"]["input_tokens_details"], {"cached_tokens": 0})
+            self.assertEqual(body["usage"]["output_tokens_details"]["reasoning_tokens"], 1)
+            self.assertEqual(body["usage"]["num_sources_used"], 0)
+
+            await responses_service.remember_response(body)
+            self.assertEqual(await responses_service.retrieve_response("resp_smoke"), body)
+            self.assertEqual(
+                await responses_service.delete_response("resp_smoke"),
+                {"id": "resp_smoke", "object": "response", "deleted": True},
+            )
+        finally:
+            async with responses_service._RESPONSE_STORE_LOCK:
+                responses_service._RESPONSE_STORE.clear()
+
+    async def test_xai_response_stream_completed_event_is_stored(self):
+        async with responses_service._RESPONSE_STORE_LOCK:
+            responses_service._RESPONSE_STORE.clear()
+
+        async def fake_stream():
+            yield (
+                "event: response.completed\n"
+                "data: {\"type\":\"response.completed\",\"response\":"
+                "{\"id\":\"resp_stream_smoke\",\"object\":\"response\","
+                "\"created_at\":123,\"status\":\"completed\","
+                "\"model\":\"grok-4.3\",\"output\":[]}}\n\n"
+            )
+            yield "data: [DONE]\n\n"
+
+        try:
+            frames = [
+                frame
+                async for frame in _safe_sse_responses(
+                    fake_stream(),
+                    store=True,
+                    response_options={"store": True},
+                )
+            ]
+
+            self.assertEqual(len(frames), 2)
+            body = await responses_service.retrieve_response("resp_stream_smoke")
+            self.assertEqual(body["completed_at"], 123)
+            self.assertTrue(body["store"])
+        finally:
+            async with responses_service._RESPONSE_STORE_LOCK:
+                responses_service._RESPONSE_STORE.clear()
+
+    def test_xai_response_compat_normalizes_upstream_objects(self):
+        body = ensure_resp_object_compat(
+            {
+                "id": "resp_upstream",
+                "object": "response",
+                "created_at": 123,
+                "status": "completed",
+                "model": "grok-4.3",
+                "output": [],
+            },
+            store=False,
+            service_tier="priority",
+        )
+
+        self.assertEqual(body["completed_at"], 123)
+        self.assertFalse(body["store"])
+        self.assertEqual(body["service_tier"], "priority")
+        self.assertEqual(body["truncation"], "disabled")
 
     def test_image_generation_request_accepts_openai_output_options(self):
         req = ImageGenerationRequest(

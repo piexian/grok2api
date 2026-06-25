@@ -100,7 +100,7 @@ class ResponsesCreateRequest(BaseModel):
     top_p:                float | None         = None
     tools:                list[Any] | None      = None
     tool_choice:          Any | None            = None
-    # silently ignored
+    # compatibility fields
     max_output_tokens:    int | None            = None
     previous_response_id: str | None            = None
     store:                bool | None           = None
@@ -109,6 +109,15 @@ class ResponsesCreateRequest(BaseModel):
     parallel_tool_calls:  bool | None           = None
     include:              list[str] | None      = None
     background:           bool | None           = None
+    frequency_penalty:    float | None          = None
+    max_tool_calls:       int | None            = None
+    presence_penalty:     float | None          = None
+    prompt_cache_key:     str | None            = None
+    safety_identifier:    str | None            = None
+    service_tier:         str | None            = None
+    text:                 dict[str, Any] | None = None
+    top_logprobs:         int | None            = None
+    user:                 str | None            = None
 
     class Config:
         extra = "ignore"
