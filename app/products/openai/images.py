@@ -160,7 +160,28 @@ async def _lite_progress_updates(
         )
 
 
-def _normalize_response_format(response_format: str) -> str:
+_IMAGE_OUTPUT_FORMATS = {"png", "jpeg", "webp"}
+_IMAGE_QUALITY_VALUES = {"auto", "low", "medium", "high", "standard", "hd"}
+_IMAGE_BACKGROUND_VALUES = {"auto", "opaque", "transparent"}
+_IMAGE_MODERATION_VALUES = {"auto", "low"}
+
+
+def normalize_image_response_format(
+    response_format: str | None = None,
+    *,
+    output_format: str | None = None,
+) -> str:
+    if output_format:
+        normalized_output = output_format.strip().lower()
+        if normalized_output not in _IMAGE_OUTPUT_FORMATS:
+            allowed = ", ".join(sorted(_IMAGE_OUTPUT_FORMATS))
+            raise ValidationError(
+                f"output_format must be one of [{allowed}]",
+                param="output_format",
+            )
+        if response_format is None:
+            return "b64_json"
+
     fmt = (response_format or "url").strip().lower()
     if fmt not in {"url", "b64_json"}:
         raise ValidationError(
@@ -168,6 +189,38 @@ def _normalize_response_format(response_format: str) -> str:
             param="response_format",
         )
     return fmt
+
+
+def validate_image_output_options(
+    *,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
+    background: str | None = None,
+    moderation: str | None = None,
+) -> None:
+    if quality is not None and quality.strip().lower() not in _IMAGE_QUALITY_VALUES:
+        allowed = ", ".join(sorted(_IMAGE_QUALITY_VALUES))
+        raise ValidationError(f"quality must be one of [{allowed}]", param="quality")
+    if output_format is not None:
+        normalize_image_response_format(output_format=output_format)
+    if output_compression is not None and not (0 <= int(output_compression) <= 100):
+        raise ValidationError(
+            "output_compression must be between 0 and 100",
+            param="output_compression",
+        )
+    if background is not None and background.strip().lower() not in _IMAGE_BACKGROUND_VALUES:
+        allowed = ", ".join(sorted(_IMAGE_BACKGROUND_VALUES))
+        raise ValidationError(
+            f"background must be one of [{allowed}]",
+            param="background",
+        )
+    if moderation is not None and moderation.strip().lower() not in _IMAGE_MODERATION_VALUES:
+        allowed = ", ".join(sorted(_IMAGE_MODERATION_VALUES))
+        raise ValidationError(
+            f"moderation must be one of [{allowed}]",
+            param="moderation",
+        )
 
 
 def _app_url() -> str:
@@ -220,7 +273,7 @@ async def _resolve_image_output(
     response_format: str,
     blob_b64: str | None = None,
 ) -> _ImageOutput:
-    fmt = _normalize_response_format(response_format)
+    fmt = normalize_image_response_format(response_format)
     cfg = get_config()
     if (
         fmt == "url"
@@ -275,9 +328,14 @@ async def generate(
     prompt:          str,
     n:               int  = 1,
     size:            str  = "1024x1024",
-    response_format: str  = "url",
+    response_format: str | None = None,
     stream:          bool = False,
     chat_format:     bool = False,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
+    background: str | None = None,
+    moderation: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Generate images.
 
@@ -294,6 +352,17 @@ async def generate(
     spec         = resolve_model(model)
     aspect_ratio = resolve_aspect_ratio(size)
     enable_nsfw  = cfg.get_bool("features.enable_nsfw", True)
+    response_format = normalize_image_response_format(
+        response_format,
+        output_format=output_format,
+    )
+    validate_image_output_options(
+        quality=quality,
+        output_format=output_format,
+        output_compression=output_compression,
+        background=background,
+        moderation=moderation,
+    )
 
     from app.dataplane.account import _directory as _acct_dir
     if _acct_dir is None:
@@ -474,7 +543,7 @@ async def generate(
 
     data = [
         {"b64_json": image.api_value}
-        if _normalize_response_format(response_format) == "b64_json"
+        if normalize_image_response_format(response_format) == "b64_json"
         else {"url": image.api_value}
         for image in finals
     ]
@@ -593,7 +662,7 @@ async def _generate_lite(
         "created": int(time.time()),
         "data": [
             {"b64_json": image.api_value}
-            if _normalize_response_format(response_format) == "b64_json"
+            if normalize_image_response_format(response_format) == "b64_json"
             else {"url": image.api_value}
             for image in images
         ],
@@ -1108,9 +1177,14 @@ async def edit(
     messages:        list[dict],
     n:               int  = 1,
     size:            str  = "1024x1024",
-    response_format: str  = "url",
+    response_format: str | None = None,
     stream:          bool = False,
     chat_format:     bool = False,
+    quality: str | None = None,
+    output_format: str | None = None,
+    output_compression: int | None = None,
+    background: str | None = None,
+    moderation: str | None = None,
 ) -> dict | AsyncGenerator[str, None]:
     """Edit images via media/post/create + imagine-image-edit chat payload."""
     cfg = get_config()
@@ -1119,6 +1193,17 @@ async def edit(
     if not (1 <= n <= _EDIT_MAX_N):
         raise ValidationError("image edit n must be between 1 and 2", param="n")
     _normalize_edit_size(size)
+    response_format = normalize_image_response_format(
+        response_format,
+        output_format=output_format,
+    )
+    validate_image_output_options(
+        quality=quality,
+        output_format=output_format,
+        output_compression=output_compression,
+        background=background,
+        moderation=moderation,
+    )
 
     prompt, image_inputs = _extract_edit_prompt_and_inputs(messages)
 
@@ -1284,11 +1369,17 @@ async def edit(
 
     data_list = [
         {"b64_json": image.api_value}
-        if _normalize_response_format(response_format) == "b64_json"
+        if normalize_image_response_format(response_format) == "b64_json"
         else {"url": image.api_value}
         for image in images
     ]
     return {"created": int(time.time()), "data": data_list}
 
 
-__all__ = ["generate", "edit", "resolve_aspect_ratio"]
+__all__ = [
+    "edit",
+    "generate",
+    "normalize_image_response_format",
+    "resolve_aspect_ratio",
+    "validate_image_output_options",
+]

@@ -41,9 +41,12 @@ from app.platform.errors import UpstreamError, ValidationError
 from app.platform.meta import get_project_version
 from app.platform.startup import run_account_backfill_migrations
 from app.platform.update_check import _is_newer
-from app.products.openai.router import _available_pools
-from app.products.openai.router import _parse_videos_create_request
+from app.products.openai import images as image_service
 from app.products.openai import video as video_service
+from app.products.openai.router import _available_pools
+from app.products.openai.router import _combine_image_edit_uploads
+from app.products.openai.router import _parse_videos_create_request
+from app.products.openai.schemas import ImageGenerationRequest
 from app.products.web.admin.batch import _prioritize_refresh_tokens
 
 
@@ -646,6 +649,48 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(record.last_use_at)
             finally:
                 await repo.close()
+
+    def test_image_generation_request_accepts_openai_output_options(self):
+        req = ImageGenerationRequest(
+            model="grok-imagine-image",
+            prompt="make an icon",
+            quality="high",
+            output_format="png",
+            output_compression=50,
+            background="auto",
+            moderation="low",
+        )
+
+        self.assertIsNone(req.response_format)
+        self.assertEqual(
+            image_service.normalize_image_response_format(
+                req.response_format,
+                output_format=req.output_format,
+            ),
+            "b64_json",
+        )
+        image_service.validate_image_output_options(
+            quality=req.quality,
+            output_format=req.output_format,
+            output_compression=req.output_compression,
+            background=req.background,
+            moderation=req.moderation,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            image_service.validate_image_output_options(output_format="gif")
+        self.assertEqual(ctx.exception.param, "output_format")
+
+    def test_image_edit_upload_combines_openai_field_names(self):
+        image_array_item = SimpleNamespace(filename="array.png")
+        image_item = SimpleNamespace(filename="single.png")
+
+        uploads = _combine_image_edit_uploads([image_array_item], [image_item])
+
+        self.assertEqual(uploads, [image_item, image_array_item])
+        with self.assertRaises(ValidationError) as ctx:
+            _combine_image_edit_uploads(None, None)
+        self.assertEqual(ctx.exception.param, "image")
 
     async def test_video_job_openai_shape_list_and_delete(self):
         async with video_service._VIDEO_JOBS_LOCK:

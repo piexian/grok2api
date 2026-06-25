@@ -17,6 +17,11 @@ class ImageConfig(BaseModel):
     n:               int | None = Field(1, ge=1, le=10)
     size:            str | None = "1024x1024"
     response_format: str | None = None
+    quality:         str | None = None
+    output_format:   Literal["png", "jpeg", "webp"] | None = None
+    output_compression: int | None = Field(None, ge=0, le=100)
+    background:      str | None = None
+    moderation:      str | None = None
 
 
 class VideoConfig(BaseModel):
@@ -46,7 +51,15 @@ class ImageGenerationRequest(BaseModel):
     prompt:          str
     n:               int | None = Field(1, ge=1, le=10)
     size:            str | None = "1024x1024"
-    response_format: str | None = "url"
+    response_format: str | None = None
+    quality:         str | None = None
+    output_format:   Literal["png", "jpeg", "webp"] | None = None
+    output_compression: int | None = Field(None, ge=0, le=100)
+    background:      str | None = None
+    moderation:      str | None = None
+    stream:          bool | None = None
+    partial_images:  int | None = Field(None, ge=0, le=3)
+    user:            str | None = None
 
 
 class ImageEditRequest(BaseModel):
@@ -56,7 +69,13 @@ class ImageEditRequest(BaseModel):
     mask:            str | None = None
     n:               int | None = Field(1, ge=1, le=2)
     size:            str | None = "1024x1024"
-    response_format: str | None = "url"
+    response_format: str | None = None
+    quality:         str | None = None
+    output_format:   Literal["png", "jpeg", "webp"] | None = None
+    output_compression: int | None = Field(None, ge=0, le=100)
+    background:      str | None = None
+    moderation:      str | None = None
+    user:            str | None = None
 
 
 class ResponsesCreateRequest(BaseModel):

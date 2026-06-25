@@ -185,6 +185,20 @@ def _validate_image_edit_n(n: int, *, param: str) -> None:
         raise ValidationError("n must be between 1 and 2 for image edit", param=param)
 
 
+def _combine_image_edit_uploads(
+    image: list[UploadFile] | None,
+    image_alt: list[UploadFile] | None,
+) -> list[UploadFile]:
+    uploads: list[UploadFile] = []
+    if image_alt:
+        uploads.extend(image_alt)
+    if image:
+        uploads.extend(image)
+    if not uploads:
+        raise ValidationError("image is required", param="image")
+    return uploads
+
+
 async def _upload_to_data_uri(upload: UploadFile, *, param: str) -> str:
     raw = await upload.read()
     if not raw:
@@ -232,9 +246,14 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 messages=messages,
                 n=cfg.n or 1,
                 size=cfg.size or "1024x1024",
-                response_format=cfg.response_format or "url",
+                response_format=cfg.response_format,
                 stream=is_stream,
                 chat_format=True,
+                quality=cfg.quality,
+                output_format=cfg.output_format,
+                output_compression=cfg.output_compression,
+                background=cfg.background,
+                moderation=cfg.moderation,
             )
 
         elif spec.is_image():
@@ -242,7 +261,7 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
 
             cfg = req.image_config or ImageConfig()
             size = cfg.size or "1024x1024"
-            fmt = cfg.response_format or "url"
+            fmt = cfg.response_format
             n = cfg.n or 1
             _validate_image_n(req.model, n, param="image_config.n")
             # Extract prompt from last user message.
@@ -260,6 +279,11 @@ async def chat_completions_endpoint(req: ChatCompletionRequest):
                 response_format=fmt,
                 stream=is_stream,
                 chat_format=True,
+                quality=cfg.quality,
+                output_format=cfg.output_format,
+                output_compression=cfg.output_compression,
+                background=cfg.background,
+                moderation=cfg.moderation,
             )
 
         elif spec.is_video():
@@ -415,6 +439,11 @@ async def image_generations(req: ImageGenerationRequest):
     spec = model_registry.get(req.model)
     if spec is None or not spec.enabled or not spec.is_image():
         raise ValidationError(f"Model {req.model!r} is not an image model", param="model")
+    if req.stream:
+        raise ValidationError(
+            "streaming image generations are not supported yet",
+            param="stream",
+        )
     _validate_image_n(req.model, req.n or 1, param="n")
 
     from .images import generate as img_gen
@@ -424,9 +453,14 @@ async def image_generations(req: ImageGenerationRequest):
         prompt=req.prompt,
         n=req.n or 1,
         size=req.size or "1024x1024",
-        response_format=req.response_format or "url",
+        response_format=req.response_format,
         stream=False,
         chat_format=False,
+        quality=req.quality,
+        output_format=req.output_format,
+        output_compression=req.output_compression,
+        background=req.background,
+        moderation=req.moderation,
     )
     return JSONResponse(result)
 
@@ -617,11 +651,17 @@ async def videos_delete(video_id: str):
 async def image_edits(
     model: Annotated[str, Form(...)],
     prompt: Annotated[str, Form(...)],
-    image: Annotated[list[UploadFile], File(..., alias="image[]")],
+    image: Annotated[list[UploadFile] | None, File(alias="image[]")] = None,
+    image_alt: Annotated[list[UploadFile] | None, File(alias="image")] = None,
     mask: Annotated[UploadFile | None, File()] = None,
     n: Annotated[int, Form()] = 1,
     size: Annotated[str, Form()] = "1024x1024",
-    response_format: Annotated[str, Form()] = "url",
+    response_format: Annotated[str | None, Form()] = None,
+    quality: Annotated[str | None, Form()] = None,
+    output_format: Annotated[str | None, Form()] = None,
+    output_compression: Annotated[int | None, Form()] = None,
+    background: Annotated[str | None, Form()] = None,
+    moderation: Annotated[str | None, Form()] = None,
 ):
     spec = model_registry.get(model)
     if spec is None or not spec.enabled or not spec.is_image_edit():
@@ -632,7 +672,11 @@ async def image_edits(
 
     from .images import edit as img_edit
 
-    image_inputs = [await _upload_to_data_uri(item, param=f"image.{index}") for index, item in enumerate(image)]
+    image_uploads = _combine_image_edit_uploads(image, image_alt)
+    image_inputs = [
+        await _upload_to_data_uri(item, param=f"image.{index}")
+        for index, item in enumerate(image_uploads)
+    ]
     # Wrap input into a single-message conversation.
     content = [{"type": "text", "text": prompt}]
     content.extend({"type": "image_url", "image_url": {"url": image_input}} for image_input in image_inputs)
@@ -645,6 +689,11 @@ async def image_edits(
         response_format=response_format,
         stream=False,
         chat_format=False,
+        quality=quality,
+        output_format=output_format,
+        output_compression=output_compression,
+        background=background,
+        moderation=moderation,
     )
     return JSONResponse(result)
 
