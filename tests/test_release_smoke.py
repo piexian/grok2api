@@ -688,7 +688,7 @@ class ReleaseSmokeTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options["text"], {"format": {"type": "json_object"}})
         self.assertFalse(options["parallel_tool_calls"])
         self.assertFalse(options["store"])
-        self.assertEqual(options["metadata"], {"trace": "smoke"})
+        self.assertNotIn("metadata", options)
         self.assertEqual(options["service_tier"], "priority")
         self.assertEqual(options["user"], "user-1")
         self.assertNotIn("stop", options)

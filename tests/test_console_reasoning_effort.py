@@ -48,7 +48,7 @@ class ConsoleReasoningEffortTest(unittest.TestCase):
         self.assertEqual(payload["max_output_tokens"], 128)
         self.assertEqual(payload["text"], {"format": {"type": "json_object"}})
         self.assertFalse(payload["store"])
-        self.assertEqual(payload["metadata"], {"trace": "smoke"})
+        self.assertNotIn("metadata", payload)
         self.assertEqual(payload["service_tier"], "priority")
         self.assertEqual(payload["user"], "user-1")
         self.assertFalse(payload["parallel_tool_calls"])

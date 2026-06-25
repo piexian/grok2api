@@ -373,6 +373,11 @@ _REASONING_EFFORT_UNSUPPORTED_MODELS = {
     "grok-4.20-multi-agent-0309",
     "grok-build-0.1",
 }
+_UNSUPPORTED_RESPONSE_OPTION_KEYS = frozenset({
+    # Verified against console.x.ai on 2026-06-25: upstream returns
+    # HTTP 400 "Argument not supported: metadata" when this field is sent.
+    "metadata",
+})
 
 
 def console_model_supports_reasoning_effort(console_model: str) -> bool:
@@ -439,7 +444,7 @@ def build_console_payload(
             payload["tool_choice"] = tool_choice
     if response_options:
         for key, value in response_options.items():
-            if value is not None:
+            if value is not None and key not in _UNSUPPORTED_RESPONSE_OPTION_KEYS:
                 payload[key] = value
 
     if isinstance(input, str):

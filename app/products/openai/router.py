@@ -221,8 +221,8 @@ def _chat_console_response_options(req: ChatCompletionRequest) -> dict[str, Any]
         options["parallel_tool_calls"] = req.parallel_tool_calls
     if req.store is not None:
         options["store"] = req.store
-    if req.metadata is not None:
-        options["metadata"] = req.metadata
+    # xAI console currently rejects `metadata` in /v1/responses payloads.
+    # Accept the OpenAI Chat field for compatibility, but do not forward it.
     if req.service_tier is not None:
         options["service_tier"] = req.service_tier
     if req.user is not None:
