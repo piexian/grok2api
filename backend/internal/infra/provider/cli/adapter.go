@@ -51,6 +51,13 @@ func (a *Adapter) SetEgress(manager *infraegress.Manager) {
 
 func (a *Adapter) Provider() account.Provider { return account.ProviderBuild }
 
+func (a *Adapter) PublicModelID(upstreamModel string) string {
+	if upstreamModel == "grok-build" {
+		return "grok-4.5"
+	}
+	return upstreamModel
+}
+
 func (a *Adapter) UpdateConfig(cfg Config) {
 	a.cfgMu.Lock()
 	a.cfg = cfg

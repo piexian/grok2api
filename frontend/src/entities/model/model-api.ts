@@ -7,7 +7,7 @@ type ListModelsInput = {
   pageSize: number;
   search?: string;
   status?: string;
-  provider?: "grok_build" | "grok_web" | "";
+  provider?: "grok_build" | "grok_web" | "grok_console" | "";
   sortBy?: string;
   sortOrder?: SortOrder;
 };

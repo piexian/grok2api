@@ -97,7 +97,7 @@ func TestReplaceProviderRoutesReconcilesStaticCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.ReplaceAccountCapabilities(ctx, webAccount.ID, []string{"fast"}, time.Now().UTC()); err != nil {
+	if err := repo.ReplaceAccountCapabilities(ctx, webAccount.ID, []string{"fast", "obsolete", "capability-only"}, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,12 +133,12 @@ func TestReplaceProviderRoutesReconcilesStaticCatalog(t *testing.T) {
 	if routes[1].ID != fastBefore.ID || routes[1].PublicID != "grok-chat-fast" || routes[1].Enabled {
 		t.Fatalf("reconciled fast route = %#v", routes[1])
 	}
-	var capability accountModelCapabilityModel
-	if err := database.db.WithContext(ctx).Where("account_id = ?", webAccount.ID).First(&capability).Error; err != nil {
+	var capabilities []accountModelCapabilityModel
+	if err := database.db.WithContext(ctx).Where("account_id = ?", webAccount.ID).Find(&capabilities).Error; err != nil {
 		t.Fatal(err)
 	}
-	if capability.UpstreamModel != "grok-chat-fast" {
-		t.Fatalf("account capability = %#v", capability)
+	if len(capabilities) != 1 || capabilities[0].UpstreamModel != "grok-chat-fast" {
+		t.Fatalf("account capabilities = %#v", capabilities)
 	}
 	var buildAfter modelRouteModel
 	if err := database.db.WithContext(ctx).Where("provider = ? AND upstream_model = ?", account.ProviderBuild, "build-model").First(&buildAfter).Error; err != nil {

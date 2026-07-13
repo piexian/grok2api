@@ -105,6 +105,22 @@ func (r *ModelRepository) GetByPublicID(ctx context.Context, publicID string) (m
 	return toModelDomain(row), nil
 }
 
+func (r *ModelRepository) GetByPublicIDIncludingDisabled(ctx context.Context, publicID string) (model.Route, error) {
+	var row modelRouteModel
+	if err := r.db.db.WithContext(ctx).Where("public_id = ?", publicID).First(&row).Error; err != nil {
+		return model.Route{}, mapError(err)
+	}
+	return toModelDomain(row), nil
+}
+
+func (r *ModelRepository) GetByProviderUpstream(ctx context.Context, provider account.Provider, upstreamModel string) (model.Route, error) {
+	var row modelRouteModel
+	if err := r.availableRoutes(r.db.db.WithContext(ctx)).Where("provider = ? AND upstream_model = ? AND enabled = ?", provider, upstreamModel, true).First(&row).Error; err != nil {
+		return model.Route{}, mapError(err)
+	}
+	return toModelDomain(row), nil
+}
+
 func (r *ModelRepository) ReplaceAccountCapabilities(ctx context.Context, accountID uint64, upstreamModels []string, syncedAt time.Time) error {
 	unique := make(map[string]struct{}, len(upstreamModels))
 	rows := make([]accountModelCapabilityModel, 0, len(upstreamModels))
@@ -288,8 +304,18 @@ func (r *ModelRepository) ReplaceProviderRoutes(ctx context.Context, provider ac
 				return mapError(err)
 			}
 		}
-		return nil
+		upstreamModels := make([]string, 0, len(values))
+		for _, value := range values {
+			upstreamModels = append(upstreamModels, value.UpstreamModel)
+		}
+		return deleteAccountModelCapabilitiesOutsideCatalog(tx, provider, upstreamModels)
 	})
+}
+
+func deleteAccountModelCapabilitiesOutsideCatalog(tx *gorm.DB, provider account.Provider, upstreamModels []string) error {
+	providerAccounts := tx.Model(&accountModel{}).Select("id").Where("provider = ?", provider)
+	return tx.Where("upstream_model NOT IN ? AND account_id IN (?)", upstreamModels, providerAccounts).
+		Delete(&accountModelCapabilityModel{}).Error
 }
 
 func renameAccountModelCapability(tx *gorm.DB, provider account.Provider, oldModel, newModel string) error {

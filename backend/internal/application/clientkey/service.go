@@ -38,6 +38,13 @@ type CreateInput struct {
 	AllowedModels        []uint64
 }
 
+type BootstrapInput struct {
+	Name          string
+	Secret        string
+	RPMLimit      int
+	MaxConcurrent int
+}
+
 type UpdateInput struct {
 	Name                 *string
 	Enabled              *bool
@@ -87,6 +94,60 @@ func NewService(keys repository.ClientKeyRepository, rateLimiter repository.Rate
 func (s *Service) UpdateDefaults(defaultRPM, defaultMax int) {
 	s.defaultRPM.Store(int64(defaultRPM))
 	s.defaultMax.Store(int64(defaultMax))
+}
+
+// Bootstrap 在客户端 Key 不存在时导入一个既有密钥，用于无中断迁移旧部署。
+func (s *Service) Bootstrap(ctx context.Context, input BootstrapInput) error {
+	raw := strings.TrimSpace(input.Secret)
+	if raw == "" {
+		return nil
+	}
+	prefix, ok := security.SplitClientKey(raw)
+	if !ok {
+		return invalidInput("引导客户端 Key 格式无效")
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" || len(name) > 160 {
+		return invalidInput("引导客户端 Key 名称长度必须在 1 到 160 之间")
+	}
+	if input.RPMLimit == 0 {
+		input.RPMLimit = int(s.defaultRPM.Load())
+	}
+	if input.MaxConcurrent == 0 {
+		input.MaxConcurrent = int(s.defaultMax.Load())
+	}
+	if input.RPMLimit < 1 || input.RPMLimit > clientkeydomain.MaxRPMLimit || input.MaxConcurrent < 1 || input.MaxConcurrent > clientkeydomain.MaxConcurrent {
+		return invalidInput("引导客户端 Key 的 RPM 或最大并发超出允许范围")
+	}
+	hash := security.HashToken(raw)
+	existing, err := s.keys.GetByPrefix(ctx, prefix)
+	if err == nil {
+		if subtle.ConstantTimeCompare([]byte(existing.SecretHash), []byte(hash)) != 1 {
+			return fmt.Errorf("%w: 引导客户端 Key 前缀已被占用", ErrConflict)
+		}
+		return nil
+	}
+	if !errors.Is(err, repository.ErrNotFound) {
+		return err
+	}
+	if s.cipher == nil {
+		return errors.New("客户端 Key 加密器未配置")
+	}
+	encryptedSecret, err := s.cipher.Encrypt(raw)
+	if err != nil {
+		return fmt.Errorf("加密引导客户端 Key: %w", err)
+	}
+	_, err = s.keys.Create(ctx, clientkeydomain.Key{
+		Name: name, Prefix: prefix, SecretHash: hash, EncryptedSecret: encryptedSecret,
+		Enabled: true, RPMLimit: input.RPMLimit, MaxConcurrent: input.MaxConcurrent,
+	})
+	if errors.Is(err, repository.ErrConflict) {
+		existing, getErr := s.keys.GetByPrefix(ctx, prefix)
+		if getErr == nil && subtle.ConstantTimeCompare([]byte(existing.SecretHash), []byte(hash)) == 1 {
+			return nil
+		}
+	}
+	return mapRepositoryError(err)
 }
 
 func (s *Service) List(ctx context.Context, page, pageSize int, search string, filter ListFilter) ([]clientkeydomain.Key, int64, error) {

@@ -11,7 +11,12 @@ func TestClientKeyFormat(t *testing.T) {
 	if !ok || prefix != "abc123" {
 		t.Fatalf("SplitClientKey(%q) = %q, %v", raw, prefix, ok)
 	}
-	for _, value := range []string{"", "g2a_", "g2a__secret", "other_abc123_secret", "gbp_abc123_old_secret"} {
+	legacy := "legacy-api-key-1234567890"
+	legacyPrefix, ok := SplitClientKey(legacy)
+	if !ok || legacyPrefix != "legacy_"+HashToken(legacy)[:24] {
+		t.Fatalf("legacy prefix = %q, ok = %v", legacyPrefix, ok)
+	}
+	for _, value := range []string{"", "short", "g2a_", "g2a__secret", "g2a_prefix_"} {
 		if _, ok := SplitClientKey(value); ok {
 			t.Fatalf("SplitClientKey(%q) unexpectedly succeeded", value)
 		}

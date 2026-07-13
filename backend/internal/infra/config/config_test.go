@@ -21,6 +21,14 @@ secrets:
 bootstrapAdmin:
   username: "admin"
   password: "password123"
+bootstrapClientKey:
+  name: "legacy"
+  secret: "legacy-api-key-1234567890"
+  rpmLimit: 1000
+  maxConcurrent: 20
+media:
+  local:
+    legacyPath: "./legacy-files"
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -45,6 +53,9 @@ bootstrapAdmin:
 	if cfg.BootstrapAdmin.Username != "admin" || cfg.BootstrapAdmin.Password != "password123" {
 		t.Fatalf("bootstrapAdmin = %#v", cfg.BootstrapAdmin)
 	}
+	if cfg.BootstrapClientKey.Secret != "legacy-api-key-1234567890" || cfg.BootstrapClientKey.RPMLimit != 1000 || cfg.BootstrapClientKey.MaxConcurrent != 20 {
+		t.Fatalf("bootstrapClientKey = %#v", cfg.BootstrapClientKey)
+	}
 	if cfg.Batch.ImportConcurrency != 25 || cfg.Batch.ConversionConcurrency != 25 || cfg.Batch.SyncConcurrency != 25 || cfg.Batch.RefreshConcurrency != 25 || cfg.Batch.RandomDelay.Value() != 500*time.Millisecond {
 		t.Fatalf("batch defaults = %#v", cfg.Batch)
 	}
@@ -55,6 +66,10 @@ bootstrapAdmin:
 	expectedMediaPath := filepath.Join(dir, "data", "media")
 	if cfg.Media.Local.Path != expectedMediaPath {
 		t.Fatalf("media path = %q, want %q", cfg.Media.Local.Path, expectedMediaPath)
+	}
+	expectedLegacyMediaPath := filepath.Join(dir, "legacy-files")
+	if cfg.Media.Local.LegacyPath != expectedLegacyMediaPath {
+		t.Fatalf("legacy media path = %q, want %q", cfg.Media.Local.LegacyPath, expectedLegacyMediaPath)
 	}
 	expectedFrontendPath := filepath.Join(dir, "frontend", "dist")
 	if cfg.Frontend.StaticPath != expectedFrontendPath {

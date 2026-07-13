@@ -34,19 +34,20 @@ const (
 
 // Config 表示后端运行配置。
 type Config struct {
-	Server            ServerConfig            `yaml:"server"`
-	Frontend          FrontendConfig          `yaml:"frontend"`
-	Database          DatabaseConfig          `yaml:"database"`
-	RuntimeStore      RuntimeStoreConfig      `yaml:"runtimeStore"`
-	Auth              AuthConfig              `yaml:"auth"`
-	Secrets           Secrets                 `yaml:"secrets"`
-	BootstrapAdmin    BootstrapAdminConfig    `yaml:"bootstrapAdmin"`
-	Provider          ProviderConfig          `yaml:"provider"`
-	Batch             BatchConfig             `yaml:"-"`
-	Media             MediaConfig             `yaml:"media"`
-	Routing           RoutingConfig           `yaml:"routing"`
-	Audit             AuditConfig             `yaml:"audit"`
-	ClientKeyDefaults ClientKeyDefaultsConfig `yaml:"clientKeyDefaults"`
+	Server             ServerConfig             `yaml:"server"`
+	Frontend           FrontendConfig           `yaml:"frontend"`
+	Database           DatabaseConfig           `yaml:"database"`
+	RuntimeStore       RuntimeStoreConfig       `yaml:"runtimeStore"`
+	Auth               AuthConfig               `yaml:"auth"`
+	Secrets            Secrets                  `yaml:"secrets"`
+	BootstrapAdmin     BootstrapAdminConfig     `yaml:"bootstrapAdmin"`
+	BootstrapClientKey BootstrapClientKeyConfig `yaml:"bootstrapClientKey"`
+	Provider           ProviderConfig           `yaml:"provider"`
+	Batch              BatchConfig              `yaml:"-"`
+	Media              MediaConfig              `yaml:"media"`
+	Routing            RoutingConfig            `yaml:"routing"`
+	Audit              AuditConfig              `yaml:"audit"`
+	ClientKeyDefaults  ClientKeyDefaultsConfig  `yaml:"clientKeyDefaults"`
 }
 
 type ServerConfig struct {
@@ -99,8 +100,9 @@ type AuthConfig struct {
 }
 
 type ProviderConfig struct {
-	Build BuildProviderConfig `yaml:"build"`
-	Web   WebProviderConfig   `yaml:"web"`
+	Build   BuildProviderConfig   `yaml:"build"`
+	Web     WebProviderConfig     `yaml:"web"`
+	Console ConsoleProviderConfig `yaml:"console"`
 }
 
 type BuildProviderConfig struct {
@@ -126,6 +128,12 @@ type WebProviderConfig struct {
 	RecoveryBackoffMax  Duration `yaml:"recoveryBackoffMax"`
 }
 
+type ConsoleProviderConfig struct {
+	BaseURL     string   `yaml:"baseURL"`
+	UserAgent   string   `yaml:"userAgent"`
+	ChatTimeout Duration `yaml:"chatTimeout"`
+}
+
 // BatchConfig 定义可热加载的账号批量任务并发上限。
 type BatchConfig struct {
 	ImportConcurrency     int
@@ -145,7 +153,8 @@ type MediaConfig struct {
 }
 
 type LocalMediaConfig struct {
-	Path string `yaml:"path"`
+	Path       string `yaml:"path"`
+	LegacyPath string `yaml:"legacyPath"`
 }
 
 type RoutingConfig struct {
@@ -174,6 +183,13 @@ type Secrets struct {
 type BootstrapAdminConfig struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+type BootstrapClientKeyConfig struct {
+	Name          string `yaml:"name"`
+	Secret        string `yaml:"secret"`
+	RPMLimit      int    `yaml:"rpmLimit"`
+	MaxConcurrent int    `yaml:"maxConcurrent"`
 }
 
 // Duration 支持在 YAML 中使用 10m、1h 等可读时间格式。
@@ -254,6 +270,10 @@ func resolveRelativePaths(cfg *Config, configPath string) error {
 	mediaPath := strings.TrimSpace(cfg.Media.Local.Path)
 	if mediaPath != "" && !filepath.IsAbs(mediaPath) {
 		cfg.Media.Local.Path = filepath.Clean(filepath.Join(baseDir, mediaPath))
+	}
+	legacyMediaPath := strings.TrimSpace(cfg.Media.Local.LegacyPath)
+	if legacyMediaPath != "" && !filepath.IsAbs(legacyMediaPath) {
+		cfg.Media.Local.LegacyPath = filepath.Clean(filepath.Join(baseDir, legacyMediaPath))
 	}
 	staticPath := strings.TrimSpace(cfg.Frontend.StaticPath)
 	if staticPath != "" && !filepath.IsAbs(staticPath) {
@@ -339,6 +359,17 @@ func (c Config) Validate() error {
 	}
 	if isExampleSecret(c.BootstrapAdmin.Password) {
 		return errors.New("bootstrapAdmin.password 不能使用示例占位值")
+	}
+	if secret := strings.TrimSpace(c.BootstrapClientKey.Secret); secret != "" {
+		if len(secret) < 16 || len(secret) > 4096 || strings.ContainsAny(secret, "\r\n\x00") {
+			return errors.New("bootstrapClientKey.secret 长度必须在 16 到 4096 之间且不能包含控制字符")
+		}
+		if name := strings.TrimSpace(c.BootstrapClientKey.Name); name == "" || len(name) > 160 {
+			return errors.New("bootstrapClientKey.name 长度必须在 1 到 160 之间")
+		}
+		if c.BootstrapClientKey.RPMLimit < 0 || c.BootstrapClientKey.RPMLimit > clientkeydomain.MaxRPMLimit || c.BootstrapClientKey.MaxConcurrent < 0 || c.BootstrapClientKey.MaxConcurrent > clientkeydomain.MaxConcurrent {
+			return errors.New("bootstrapClientKey 的 RPM 或最大并发超出允许范围")
+		}
 	}
 	if publicAPIURL.Scheme == "https" && !c.Auth.SecureCookies {
 		return errors.New("HTTPS 公共地址必须启用 auth.secureCookies")
@@ -438,6 +469,10 @@ func defaultConfig() Config {
 				VideoTimeout:     Duration(15 * time.Minute),
 				MediaConcurrency: 4, RecoveryBackoffBase: Duration(30 * time.Second),
 				RecoveryBackoffMax: Duration(30 * time.Minute),
+			},
+			Console: ConsoleProviderConfig{
+				BaseURL: "https://console.x.ai", UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+				ChatTimeout: Duration(5 * time.Minute),
 			},
 		},
 		Batch: BatchConfig{

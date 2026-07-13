@@ -67,7 +67,7 @@ func (s *Service) SetLogger(logger *slog.Logger) {
 
 func (s *Service) List(ctx context.Context, page, pageSize int, search string, filter ListFilter) ([]modeldomain.Route, int64, error) {
 	page, pageSize = normalizePage(page, pageSize)
-	if !validModelFilter(filter.Provider, "", string(account.ProviderBuild), string(account.ProviderWeb)) || !validModelFilter(filter.Status, "", "enabled", "disabled") || !repository.IsValidSort(filter.Sort, "publicId", "upstreamModel", "status", "provider", "accountSupport", "lastSyncedAt") {
+	if !validModelFilter(filter.Provider, "", string(account.ProviderBuild), string(account.ProviderWeb), string(account.ProviderConsole)) || !validModelFilter(filter.Status, "", "enabled", "disabled") || !repository.IsValidSort(filter.Sort, "publicId", "upstreamModel", "status", "provider", "accountSupport", "lastSyncedAt") {
 		return nil, 0, ErrInvalidFilter
 	}
 	var enabled *bool
@@ -94,6 +94,10 @@ func (s *Service) ListEnabled(ctx context.Context) ([]modeldomain.Route, error) 
 // GetByPublicID 每次读取共享主数据库，保证多实例下的路由禁用立即生效。
 func (s *Service) GetByPublicID(ctx context.Context, publicID string) (modeldomain.Route, error) {
 	return s.models.GetByPublicID(ctx, publicID)
+}
+
+func (s *Service) GetByProviderUpstream(ctx context.Context, providerValue account.Provider, upstreamModel string) (modeldomain.Route, error) {
+	return s.models.GetByProviderUpstream(ctx, providerValue, upstreamModel)
 }
 
 func (s *Service) Update(ctx context.Context, id uint64, input UpdateInput) (modeldomain.Route, error) {
@@ -191,10 +195,43 @@ func (s *Service) syncAllAccounts(ctx context.Context) (int, error) {
 	for value := range uniqueModels {
 		models = append(models, value)
 	}
-	if err := s.models.UpsertDiscovered(ctx, account.ProviderBuild, models); err != nil {
+	if err := s.upsertDiscovered(ctx, account.ProviderBuild, models, adapter); err != nil {
 		return 0, err
 	}
-	return len(models), nil
+	synced := len(models)
+
+	webAccounts, webErr := s.accounts.ListEnabled(ctx, account.ProviderWeb)
+	if webErr == nil && len(webAccounts) > 0 {
+		webAdapter, webOK := s.providers.Models(account.ProviderWeb)
+		if webOK {
+			webResults, _, _ := batch.Map(ctx, webAccounts, batch.Options{Workers: s.bulkPool.Limit(), Pool: s.bulkPool}, func(workCtx context.Context, value account.Credential) ([]string, error) {
+				return s.syncAccountCapabilities(workCtx, value, webAdapter)
+			})
+			webModels := make(map[string]struct{})
+			for _, result := range webResults {
+				if result.Err != nil {
+					continue
+				}
+				for _, value := range result.Value {
+					value = strings.TrimSpace(value)
+					if value != "" {
+						webModels[value] = struct{}{}
+					}
+				}
+			}
+			if len(webModels) > 0 {
+				webModelSlice := make([]string, 0, len(webModels))
+				for value := range webModels {
+					webModelSlice = append(webModelSlice, value)
+				}
+				if upsertErr := s.upsertDiscovered(ctx, account.ProviderWeb, webModelSlice, webAdapter); upsertErr == nil {
+					synced += len(webModelSlice)
+				}
+			}
+		}
+	}
+
+	return synced, nil
 }
 
 // HasSuccessfulAccountSync 判断账号是否已有成功模型能力快照，不触发上游请求。
@@ -216,10 +253,38 @@ func (s *Service) SyncAccount(ctx context.Context, accountID uint64) (int, error
 	if err != nil {
 		return 0, err
 	}
-	if err := s.models.UpsertDiscovered(ctx, credential.Provider, models); err != nil {
+	if err := s.upsertDiscovered(ctx, credential.Provider, models, adapter); err != nil {
 		return 0, err
 	}
 	return len(models), nil
+}
+
+func (s *Service) upsertDiscovered(ctx context.Context, providerValue account.Provider, upstreamModels []string, adapter provider.ModelCatalogAdapter) error {
+	if err := s.models.UpsertDiscovered(ctx, providerValue, upstreamModels); err != nil {
+		return err
+	}
+	mapper, ok := adapter.(provider.ModelPublicIDAdapter)
+	if !ok {
+		return nil
+	}
+	for _, upstreamModel := range upstreamModels {
+		publicID := strings.TrimSpace(mapper.PublicModelID(upstreamModel))
+		if publicID == "" || publicID == upstreamModel {
+			continue
+		}
+		route, err := s.models.GetByProviderUpstream(ctx, providerValue, upstreamModel)
+		if err != nil {
+			return err
+		}
+		if route.PublicID != upstreamModel {
+			continue
+		}
+		route.PublicID = publicID
+		if _, err := s.models.Update(ctx, route); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) syncAccountCapabilities(ctx context.Context, value account.Credential, adapter provider.ModelCatalogAdapter) ([]string, error) {

@@ -41,16 +41,17 @@ type Service struct {
 	mu         sync.RWMutex
 	buildUA    string
 	webUA      string
+	consoleUA  string
 }
 
-func NewService(repository repository.EgressRepository, cipher *security.Cipher, buildUA, webUA string) *Service {
-	return &Service{repository: repository, cipher: cipher, buildUA: strings.TrimSpace(buildUA), webUA: strings.TrimSpace(webUA)}
+func NewService(repository repository.EgressRepository, cipher *security.Cipher, buildUA, webUA, consoleUA string) *Service {
+	return &Service{repository: repository, cipher: cipher, buildUA: strings.TrimSpace(buildUA), webUA: strings.TrimSpace(webUA), consoleUA: strings.TrimSpace(consoleUA)}
 }
 
-func (s *Service) UpdateDefaults(buildUA, webUA string) {
+func (s *Service) UpdateDefaults(buildUA, webUA, consoleUA string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.buildUA, s.webUA = strings.TrimSpace(buildUA), strings.TrimSpace(webUA)
+	s.buildUA, s.webUA, s.consoleUA = strings.TrimSpace(buildUA), strings.TrimSpace(webUA), strings.TrimSpace(consoleUA)
 }
 
 func (s *Service) DefaultUserAgents() map[string]string {
@@ -58,7 +59,7 @@ func (s *Service) DefaultUserAgents() map[string]string {
 	defer s.mu.RUnlock()
 	return map[string]string{
 		string(domain.ScopeAll): s.webUA, string(domain.ScopeBuild): s.buildUA,
-		string(domain.ScopeWeb): s.webUA, string(domain.ScopeWebAsset): s.webUA,
+		string(domain.ScopeWeb): s.webUA, string(domain.ScopeConsole): s.consoleUA, string(domain.ScopeWebAsset): s.webUA,
 	}
 }
 
@@ -115,8 +116,8 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 	if name == "" || len(name) > 160 {
 		return domain.Node{}, fmt.Errorf("%w: 名称必须在 1 到 160 个字符之间", ErrInvalidInput)
 	}
-	if input.Scope != domain.ScopeAll && input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeWebAsset {
-		return domain.Node{}, fmt.Errorf("%w: scope 必须是 all、grok_build、grok_web 或 grok_web_asset", ErrInvalidInput)
+	if input.Scope != domain.ScopeAll && input.Scope != domain.ScopeBuild && input.Scope != domain.ScopeWeb && input.Scope != domain.ScopeConsole && input.Scope != domain.ScopeWebAsset {
+		return domain.Node{}, fmt.Errorf("%w: scope 必须是 all、grok_build、grok_web、grok_console 或 grok_web_asset", ErrInvalidInput)
 	}
 	value.Name, value.Scope, value.Enabled = name, input.Scope, input.Enabled
 	value.UserAgent = strings.TrimSpace(input.UserAgent)
@@ -124,6 +125,8 @@ func (s *Service) applyInput(value domain.Node, input Input, create bool) (domai
 		s.mu.RLock()
 		if input.Scope == domain.ScopeBuild {
 			value.UserAgent = s.buildUA
+		} else if input.Scope == domain.ScopeConsole {
+			value.UserAgent = s.consoleUA
 		} else {
 			value.UserAgent = s.webUA
 		}

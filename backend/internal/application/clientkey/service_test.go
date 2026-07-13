@@ -57,6 +57,42 @@ func TestCreateUsesG2AClientKeyFormat(t *testing.T) {
 	}
 }
 
+func TestBootstrapPreservesLegacyClientKey(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "legacy-client-key.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(relational.NewClientKeyRepository(database), successfulRateLimiter{}, successfulConcurrencyLimiter{}, 60, 5, testCipher(t))
+	legacy := "legacy-api-key-1234567890"
+	input := BootstrapInput{Name: "迁移兼容 Key", Secret: legacy, RPMLimit: 1000, MaxConcurrent: 20}
+	if err := service.Bootstrap(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Bootstrap(ctx, input); err != nil {
+		t.Fatalf("重复引导应保持幂等: %v", err)
+	}
+	value, release, err := service.Authenticate(ctx, legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if value.RPMLimit != 1000 || value.MaxConcurrent != 20 {
+		t.Fatalf("引导限制 = rpm %d, concurrency %d", value.RPMLimit, value.MaxConcurrent)
+	}
+	revealed, err := service.RevealSecret(ctx, value.ID)
+	if err != nil || revealed != legacy {
+		t.Fatalf("revealed legacy secret = %q, err = %v", revealed, err)
+	}
+	if _, _, err := service.Authenticate(ctx, legacy+"-wrong"); !errors.Is(err, ErrInvalidKey) {
+		t.Fatalf("错误旧 Key 的鉴权结果 = %v", err)
+	}
+}
+
 func TestAuthenticateDistinguishesRuntimeStoreFailures(t *testing.T) {
 	ctx := context.Background()
 	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "runtime-errors.db"))

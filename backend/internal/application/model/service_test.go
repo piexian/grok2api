@@ -20,14 +20,84 @@ import (
 )
 
 func TestModelProviderFilterAcceptsOnlyKnownProviders(t *testing.T) {
-	for _, value := range []string{"", string(account.ProviderBuild), string(account.ProviderWeb)} {
-		if !validModelFilter(value, "", string(account.ProviderBuild), string(account.ProviderWeb)) {
+	for _, value := range []string{"", string(account.ProviderBuild), string(account.ProviderWeb), string(account.ProviderConsole)} {
+		if !validModelFilter(value, "", string(account.ProviderBuild), string(account.ProviderWeb), string(account.ProviderConsole)) {
 			t.Fatalf("known provider rejected: %q", value)
 		}
 	}
-	if validModelFilter("cli", "", string(account.ProviderBuild), string(account.ProviderWeb)) {
+	if validModelFilter("cli", "", string(account.ProviderBuild), string(account.ProviderWeb), string(account.ProviderConsole)) {
 		t.Fatal("unsupported provider filter was accepted")
 	}
+}
+
+func TestSyncAlsoRefreshesWebModelCapabilities(t *testing.T) {
+	ctx := context.Background()
+	database, err := relational.OpenSQLite(ctx, filepath.Join(t.TempDir(), "model-provider-sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InitializeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := security.NewCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := cipher.Encrypt("credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountRepo := relational.NewAccountRepository(database)
+	modelRepo := relational.NewModelRepository(database)
+	auditRepo := relational.NewAuditRepository(database)
+	for _, value := range []account.Credential{
+		{Provider: account.ProviderBuild, AuthType: account.AuthTypeOAuth, Name: "build", SourceKey: "build", EncryptedAccessToken: encrypted, Enabled: true, AuthStatus: account.AuthStatusActive},
+		{Provider: account.ProviderWeb, AuthType: account.AuthTypeSSO, Name: "web", SourceKey: "web", EncryptedAccessToken: encrypted, Enabled: true, AuthStatus: account.AuthStatusActive},
+	} {
+		if _, _, err := accountRepo.UpsertByIdentity(ctx, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registry := provider.NewRegistry(
+		providerCatalogAdapter{provider: account.ProviderBuild, models: []string{"grok-build"}, publicIDs: map[string]string{"grok-build": "grok-4.5"}},
+		providerCatalogAdapter{provider: account.ProviderWeb, models: []string{"grok-chat-fast"}},
+	)
+	accountService := accountapp.NewService(accountRepo, auditRepo, memory.NewDeviceSessionStore(), memory.NewStickyStore(), registry, cipher, nil)
+	service := NewService(modelRepo, accountRepo, accountService, registry)
+
+	count, err := service.Sync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("synced models = %d", count)
+	}
+	for _, publicID := range []string{"grok-4.5", "grok-chat-fast"} {
+		if _, err := modelRepo.GetByPublicID(ctx, publicID); err != nil {
+			t.Fatalf("model %q missing: %v", publicID, err)
+		}
+	}
+	buildRoute, err := modelRepo.GetByProviderUpstream(ctx, account.ProviderBuild, "grok-build")
+	if err != nil || buildRoute.PublicID != "grok-4.5" {
+		t.Fatalf("build route = %#v, err = %v", buildRoute, err)
+	}
+}
+
+type providerCatalogAdapter struct {
+	provider  account.Provider
+	models    []string
+	publicIDs map[string]string
+}
+
+func (a providerCatalogAdapter) Provider() account.Provider { return a.provider }
+
+func (a providerCatalogAdapter) ListModels(context.Context, account.Credential) ([]string, error) {
+	return append([]string(nil), a.models...), nil
+}
+
+func (a providerCatalogAdapter) PublicModelID(upstreamModel string) string {
+	return a.publicIDs[upstreamModel]
 }
 
 func TestSyncAggregatesCapabilitiesFromAllAccounts(t *testing.T) {

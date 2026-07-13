@@ -12,7 +12,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-const clientKeyScheme = "g2a"
+const (
+	clientKeyScheme          = "g2a"
+	legacyClientKeyPrefix    = "legacy_"
+	minLegacyClientKeyLength = 16
+	maxLegacyClientKeyLength = 4096
+)
 
 type adminClaims struct {
 	AdminID   uint64 `json:"adminId"`
@@ -97,11 +102,15 @@ func FormatClientKey(prefix, secret string) string {
 	return clientKeyScheme + "_" + prefix + "_" + secret
 }
 
-// SplitClientKey 解析 g2a_<prefix>_<secret> 格式的客户端 Key。
+// SplitClientKey 解析标准客户端 Key，并为迁移进来的旧格式生成稳定查询前缀。
 func SplitClientKey(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
 	parts := strings.SplitN(raw, "_", 3)
-	if len(parts) != 3 || parts[0] != clientKeyScheme || parts[1] == "" || parts[2] == "" {
+	if len(parts) == 3 && parts[0] == clientKeyScheme && parts[1] != "" && parts[2] != "" {
+		return parts[1], true
+	}
+	if strings.HasPrefix(raw, clientKeyScheme+"_") || len(raw) < minLegacyClientKeyLength || len(raw) > maxLegacyClientKeyLength || strings.ContainsAny(raw, "\r\n\x00") {
 		return "", false
 	}
-	return parts[1], true
+	return legacyClientKeyPrefix + HashToken(raw)[:24], true
 }

@@ -28,6 +28,13 @@ bootstrapAdmin:
   # [必须修改] 首次启动前替换为强密码；管理员创建成功后建议删除本段。
   password: "replace-with-a-strong-password"
 
+# 仅用于从旧版迁移既有 API Key。首次成功启动后可删除本段，数据库中的 Key 会继续生效。
+# bootstrapClientKey:
+#   name: "旧部署兼容 Key"
+#   secret: "replace-with-the-existing-api-key"
+#   rpmLimit: 100000
+#   maxConcurrent: 1024
+
 frontend:
   # [按需修改] 生产环境改为外部 HTTPS 地址，例如 https://api.example.com。
   publicApiBaseURL: "http://127.0.0.1:8000"
@@ -68,9 +75,20 @@ auth:
   # [按需修改] 外部地址使用 HTTPS 时必须设为 true。
   secureCookies: false
 
+provider:
+  console:
+    # [通常不要修改] Console Responses API 地址。
+    baseURL: "https://console.x.ai"
+    # [通常不要修改] 必须与出口节点浏览器指纹保持一致。
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+    # [按需修改] Console 单次对话超时。
+    chatTimeout: 5m
+
 media:
   # [通常不要修改] 当前仅支持 local；容量和清理策略在管理端设置。
   driver: local
   local:
     # [按需修改] 图片二进制目录；数据库只保存资源元数据。
     path: "./data/media"
+    # [迁移兼容] v2 的 data/files 目录；留空则不注册旧版 /v1/files/* 路由。
+    legacyPath: ""

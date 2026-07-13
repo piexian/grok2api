@@ -22,6 +22,15 @@ func TestSystemInfoRequiresAdminAuthentication(t *testing.T) {
 	}
 }
 
+func TestLegacyHealthEndpoint(t *testing.T) {
+	router := New(Dependencies{RequestTimeout: time.Second, MaxBodyBytes: 1024})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != `{"status":"ok"}` {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestFrontendStaticFilesAndSPAFallback(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {

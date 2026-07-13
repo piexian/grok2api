@@ -43,6 +43,7 @@ type Dependencies struct {
 	SwaggerEnabled     bool
 	PublicAPIBaseURL   string
 	FrontendStaticPath string
+	LegacyMediaPath    string
 	Ready              func(context.Context) bool
 	AdminAuth          *adminauthapp.Service
 	Accounts           *accountapp.Service
@@ -65,6 +66,7 @@ func New(deps Dependencies) *gin.Engine {
 	}
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestID(), middleware.SecurityHeaders(), middleware.MaxBodyBytes(deps.MaxBodyBytes), middleware.Timeout(deps.RequestTimeout), middleware.AccessLog(deps.Logger))
+	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.Ready != nil && deps.Ready(c.Request.Context()) {
@@ -76,7 +78,7 @@ func New(deps Dependencies) *gin.Engine {
 	if deps.SwaggerEnabled {
 		router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	}
-	mediahttp.NewHandler(deps.Media).RegisterPublic(router)
+	mediahttp.NewHandler(deps.Media, deps.LegacyMediaPath).RegisterPublic(router)
 
 	adminRoot := router.Group("/api/admin/v1")
 	authHandler := adminauthhttp.NewHandler(deps.AdminAuth, deps.SecureCookies)
